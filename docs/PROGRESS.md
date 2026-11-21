@@ -24,7 +24,7 @@ No permission escalation available in this session. Files preserved in workspace
 Immediate next action in a normal user terminal: restore network and Docker/WSL,
 then configure origin and fetch before choosing a branch or committing:
 
-    git remote add origin https://github.com/bob-the-doorknob/Buildathon.git
+    git remote add origin https://github.com/bob-the-doorknob/plingplong.git
     git fetch origin
     git log --oneline --all --decorate -10
 
@@ -211,7 +211,23 @@ archives and Python caches remain ignored. No tracked env/private-key filenames.
 
 Remaining manual actions: GitHub Settings > General > Danger Zone > Change
 repository visibility > Public, then sign in to the official RWX track, submit
-https://github.com/bob-the-doorknob/Buildathon with the final checkpoint SHA and
+https://github.com/bob-the-doorknob/plingplong with the final checkpoint SHA and
 wait for an accepted practice result. Visibility and submission not performed.
 No coverage work until a first valid submission is confirmed. Browser access was
 unavailable in preceding checkpoint; no authenticated leaderboard session here.
+
+## Phase 5 production candidate
+
+The accepted all-tests commit 205133366ef9ed2be41a56ac606a51b5d5ac6d5e derives commit IDs from filenames and reuses one full schedule. Its user-reported official result was 1472.8 seconds for 40 commits with zero misses. The public sample below has 30 commits.
+
+| Public sample variant | Simulated seconds | Host CPU seconds | Missed commits | Mean tests | Full fallbacks |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Full suite LPT | 1104.510 | 0.000 (clock resolution) | 0 | 1620.00 | 30 |
+| File-level execution and readers | 864.461 | 0.453 | 0 | 1242.93 | 23 |
+| Semantic function entries, static test importers and readers | 644.726 | 0.375 | 0 | 746.97 | 13 |
+
+Pinned SQLGlot with Python 3.13.18 passed 1620 numbered tests and 25440 subtests with one organizer skip. Reversing test order produced failures in two parent IDs, both retained in every narrowed selection. Worker shards were observed for the optimizer and executor test files. The 1041609-byte index covers 215 original source and fixture files. It contains 5455 observation and static-dependency keys.
+
+The final 13 fallbacks comprise eight structural or textual Python edits, three unsupported diffs, one shared or missing observation and one fixture text edit. Largest selection was 1620. Worst simulated commit cost was 36.817 seconds. Two complete independently mutated suites yielded 37 failing IDs for the serialization mutation and one for the optimizer fixture mutation. All were selected, among 184 and four candidates respectively.
+
+36 project tests passed. WSL make sample passed under the official isolation flags. Three restricted container repeats produced identical 98319-byte stdout, median selector CPU 0.436 seconds, maximum peak RSS 48396 KiB and wall time below 0.49 seconds per selector. Local simulated time improved by 459.784 seconds (41.63%). This candidate awaits user authorization for a practice leaderboard run. The accepted competition entry remains the previous revision.

@@ -29,3 +29,7 @@ Execution: single agent, as explicitly requested. No worktree: empty repository 
 - [ ] Validate pinned SQLGlot import graph and collect coverage (source access blocked).
 - [ ] Integrate and benchmark real hybrid (activation evidence unavailable).
 - [ ] Docker acceptance, commit and push (execution isolation).
+# Phase 5 production plan
+1. Trace the locked suite on the pinned archive. Capture function entries and file reads across setup, tests and child processes. Validate exact collected IDs.
+2. Apply supported patches against archived originals with exact context. Narrow only observed fixture changes and localized function bodies. Fall back on missing evidence.
+3. Compare independent mutation failures and official scores. Review, build under scorer limits and push the candidate branch.

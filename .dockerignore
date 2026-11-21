@@ -1,3 +1,9 @@
 *
 !Dockerfile
 !selector.py
+
+!hybrid.py
+!impact.py
+!semantic.py
+!evidence.gz
+!SQLGlot-LICENSE

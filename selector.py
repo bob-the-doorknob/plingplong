@@ -1,4 +1,6 @@
-"""Conservative all-test selector with cost-aware deterministic LPT scheduling."""
+"""Pinned-source coverage selector with cost-aware deterministic LPT scheduling."""
+from hybrid import load, decide
+
 import json
 import math
 import sys
@@ -37,9 +39,15 @@ def schedule(tests: list[dict]) -> list[list[int]]:
 def main() -> None:
     tests = json.loads((DATA / 'tests.json').read_text(encoding='utf-8'))['tests']
     workers = schedule(tests)
+    evidence = load(tests)
     for patch in sorted((DATA / 'commits').glob('*.patch')):
-        print(json.dumps({'commit': patch.stem, 'workers': workers}, separators=(',', ':')))
-    print(f'selected {len(tests)} tests on every commit', file=sys.stderr)
+        try:
+            ids, reason = decide(patch.read_text(encoding='utf-8'), evidence)
+        except (UnicodeError, OSError, RecursionError):
+            ids, reason = None, 'unreadable_patch'
+        selected = workers if ids is None else schedule([t for t in tests if t['id'] in ids])
+        print(json.dumps({'commit': patch.stem, 'workers': selected}, separators=(',', ':')))
+        print(patch.stem, reason, sum(map(len, selected)), file=sys.stderr)
 
 
 if __name__ == '__main__':
