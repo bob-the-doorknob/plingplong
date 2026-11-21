@@ -426,3 +426,34 @@ P10-B index verification was repeated with startup and exit manifests for
 every traced Python process. Both suite orders produced the exact previously
 committed line index blob 9c019d24bd9db238944145c23ee28adcd4d8005b. This
 checks collected child-process completion in addition to test outcomes.
+
+P10-C records whether identity and equality transports return the same bool
+at an operand pair with audited native comparison slots. The offline AST
+instrumentation retains operand evaluation order and the original operator
+result. The group index requires agreement for the individual test in both
+suite orders. Any divergence or unsupported observation blocks that test.
+Shared ambiguities block the site. Pool tasks carry their submitting test ID
+and all started interpreter shards must complete. Test importers, text
+readers and untraced tests are kept independently of this evidence.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-C | 204.090 | 1.004 | 205.094 | 0 | 74.00 |
+
+P10-A is 0bf39c25e32b2b0542bc91790dc1d27917d5b9a8. P10-B is
+9b02a4e54594d185de5e81cd7c76d52412aab6bc, with collection hardening in
+fbbf7c90934183618a2aa656b1618da046e823e6. The predicate index is 33578 bytes.
+Its baseline instrumented run passed all 1620 numbered tests. Reverse order
+reproduced the two known parent failures. Restricted Docker emitted
+11311 identical bytes in three runs, at most 78664 KiB peak RSS and 1.068 s
+selector wall time. Both Make targets and 77 unit tests passed.
+One independent identity mutation retained all 6 failing IDs. A second
+completed without failures. The Hive collection error remains inconclusive.
+A development-only oracle computed with the public scorer was 94.351 s.
+
+A restricted single-test TPC-DS run passed all 57 subtests and used 22.170 s
+CPU at 15.987 s wall time. For an independent optimizer mutation, the
+optimizer-only probe produced 57 unchanged expression graphs at 2.401 s
+CPU, compared with 2.991 s for the original. This measures a bounded stage.
+The probe does not reproduce executor input serialization, plan execution
+or the DuckDB comparison. It supplies no exclusion evidence to production.

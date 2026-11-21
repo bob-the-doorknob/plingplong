@@ -71,6 +71,10 @@ REPLACEMENTS.update({
     'statement_executor_guard': [('sqlglot/executor/context.py', 'if self._table is None:', 'if self._table is not None:')],
     'statement_optimizer_boolean': [('sqlglot/optimizer/eliminate_joins.py', 'if name in left_tables and name not in right_tables:', 'if name in left_tables or name not in right_tables:')],
 })
+REPLACEMENTS.update({
+    'predicate_column_identity': [('sqlglot/optimizer/merge_subqueries.py', 'if table_column.name == conflict:', 'if table_column.name is conflict:')],
+    'predicate_type_identity': [('sqlglot/optimizer/annotate_types.py', 'if e.name == expression.expression.name:', 'if e.name is expression.expression.name:')],
+})
 REPLACEMENTS['comment_mixed'] = REPLACEMENTS['function']
 
 

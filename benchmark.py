@@ -19,8 +19,9 @@ def main():
     details = parser.parse_args().details
     tests = json.loads((SAMPLE/'tests.json').read_text())['tests']
     answers = json.loads((SAMPLE/'answers.json').read_text())['commits']
-    durations = {t['number']: round(t['seconds'] * 1000) for t in tests}
-    for mode in ['all', 'file', 'scope']:
+    by_number = {t['number']: t for t in tests}
+    durations = {n: round(t['seconds'] * 1000) for n, t in by_number.items()}
+    for mode in ['all', 'file', 'statement', 'scope']:
         start, cpu = time.perf_counter(), time.process_time()
         full = selector.schedule(tests)
         evidence = load(tests) if mode != 'all' else None
@@ -36,7 +37,7 @@ def main():
                 makespan = max((sum(durations[n] for n in w) for w in workers), default=0)
                 largest = sorted((n for w in workers for n in w), key=lambda n: (-durations[n], n))[:5]
                 breakdown.append((makespan + 2000 * len(workers), patch.stem, counts[-1],
-                                  len(workers), makespan, reason, largest))
+                                  len(workers), makespan, reason, largest, workers))
             rows.append(json.dumps(dict(commit=patch.stem,workers=workers),separators=(',',':')))
         payload = ('\n'.join(rows)+'\n').encode()
         cpu, wall = time.process_time()-cpu, time.perf_counter()-start
@@ -45,10 +46,17 @@ def main():
         print(mode, result, 'cpu',cpu,'wall',wall,'mean',sum(counts)/len(counts),'max',max(counts),'fallback',dict(reasons))
         if mode == 'scope':
             Path('output.jsonl').write_bytes(payload)
-            for cost, commit, count, workers, makespan, reason, largest in sorted(breakdown, reverse=True):
+            for cost, commit, count, workers, makespan, reason, largest, packed in sorted(breakdown, reverse=True):
                 print(f'{commit}: cost={cost / 1000:.3f}s makespan={makespan / 1000:.3f}s '
                       f'workers={workers} tests={count} reason={reason} '
                       f'longest={[(tests[n]["id"], durations[n]) for n in largest]}')
+                selected = [n for worker in packed for n in worker]
+                marginal = []
+                for number in largest:
+                    revised = selector.schedule([by_number[n] for n in selected if n != number])
+                    reduced = max((sum(durations[n] for n in w) for w in revised), default=0) + 2000 * len(revised)
+                    marginal.append((by_number[number]['id'], cost - reduced))
+                print(f'  marginal_ms={marginal}')
                 diff = (SAMPLE/'commits'/f'{commit}.patch').read_text(encoding='utf-8')
                 try:
                     sources = apply_patch(diff, evidence['sources'])

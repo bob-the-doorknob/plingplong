@@ -2,6 +2,7 @@
 import unittest
 
 from semantic import statement_spans
+from predicate import comparison_swap
 
 
 class StatementLines(unittest.TestCase):
@@ -43,3 +44,56 @@ class StatementLines(unittest.TestCase):
         self.assertIsNone(statement_tests(old, new, path, evidence))
         evidence['files'][path] = {}
         self.assertIsNone(statement_tests(old, new, path, evidence))
+
+
+class ComparisonSwap(unittest.TestCase):
+    def test_one_comparison_with_identical_operands_and_context(self):
+        old = 'def f(a):\n    if a is None:\n        return 1\n'
+        new = old.replace('is None','== None')
+        self.assertEqual(comparison_swap(old, new), '2:7')
+        self.assertIsNone(comparison_swap(old, new.replace('return 1', 'return 2')))
+        self.assertIsNone(comparison_swap(old, new.replace('None', 'a')))
+        self.assertIsNone(comparison_swap(old, new.replace('==', '!=')))
+
+    def test_untracked_importers_readers_and_uncertainty_are_retained(self):
+        from test_class_attributes import git_patch
+        from hybrid import decide
+        path = 'sqlglot/example.py'
+        old = 'def f(a):\n    if a is None:\n        return 1\n    return 2\n'
+        new = old.replace('is None', '== None')
+        patch = git_patch({path: (old, new)})
+        evidence = {
+            'ids': ['uncertain','agree','disagree','reader','importer'],
+            'sources': {path: old},
+            'hits': {path+'::f': [1, 2], path: [3], path+'::@importers': [4]},
+            'predicate_evidence': {'keys': {path+':2:7': 0}, 'groups': [[1]], 'extra': [0]},
+        }
+        self.assertEqual(decide(patch, evidence),
+                         ({'uncertain','disagree','reader','importer'}, 'predicate'))
+        self.assertEqual(decide(patch, evidence, 'statement')[0],
+                         {'agree','disagree','reader','importer'})
+
+    def test_operand_slots_do_not_admit_custom_rich_comparison(self):
+        import importlib
+        import sys
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with patch.object(sys, 'path', [str(Path('tools').resolve()), *sys.path]):
+            tracer = importlib.import_module('trace_predicates')
+
+        class Spoof(type):
+            @property
+            def __mro__(self):
+                return (object,)
+
+        class Hostile(metaclass=Spoof):
+            def __eq__(self, other):
+                raise AssertionError('extra equality evaluation')
+
+        value = Hostile()
+        self.assertFalse(tracer.native(value))
+        self.assertTrue(tracer.compare(value, value, 'unknown', 'Is'))
+        self.assertFalse(tracer.observations['unknown'][tracer.trace_events.context])
+        self.assertFalse(tracer.compare(object(), None, 'native', 'Is'))
+        self.assertTrue(tracer.observations['native'][tracer.trace_events.context])

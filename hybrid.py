@@ -10,6 +10,7 @@ from pathlib import Path
 
 from impact import changed_files
 from semantic import classify_change, statement_spans
+from predicate import comparison_swap
 
 PIN = 'eb11aec4be8cb2122afe713a4816662c3f0fb2fa'
 
@@ -212,13 +213,15 @@ def load(tests):
         base = Path(__file__).with_name('evidence.gz').read_bytes()
         data = json.loads(gzip.decompress(base))
         if data['schema'] == 1 and data['pin'] == PIN and sorted(t['id'] for t in tests) == data['ids']:
-            try:
-                lines = json.loads(gzip.decompress(Path(__file__).with_name('lines.gz').read_bytes()))
-                if (lines['version'] == 1 and lines['pin'] == PIN and lines['ids'] == data['ids']
-                        and lines['base_digest'] == hashlib.sha256(base).hexdigest()):
-                    data['line_evidence'] = lines
-            except (OSError, EOFError, ValueError, KeyError, TypeError, zlib.error):
-                pass
+            digest = hashlib.sha256(base).hexdigest()
+            for filename, key in (('lines.gz', 'line_evidence'), ('predicates.gz', 'predicate_evidence')):
+                try:
+                    auxiliary = json.loads(gzip.decompress(Path(__file__).with_name(filename).read_bytes()))
+                    if (auxiliary['version'] == 1 and auxiliary['pin'] == PIN and auxiliary['ids'] == data['ids']
+                            and auxiliary['base_digest'] == digest):
+                        data[key] = auxiliary
+                except (OSError, EOFError, ValueError, KeyError, TypeError, zlib.error):
+                    pass
             return data
     except (OSError, EOFError, ValueError, KeyError, TypeError, zlib.error):
         pass
@@ -255,6 +258,7 @@ def decide(diff, data, mode='scope'):
     chosen = set(hits.get('!untraced', []))
     code_changed = False
     statement_selected = False
+    predicate_selected = False
     for path, new in updates.items():
         readers = hits.get(path, [])
         chosen.update(readers)
@@ -301,7 +305,22 @@ def decide(diff, data, mode='scope'):
                 if key not in hits:
                     return None, 'unobserved_scope'
                 scopes.update(hits[key])
-            if mode == 'scope' and not change['structural'] and -1 not in scopes and 'line_evidence' in data:
+            # A swap observed on native slots can narrow execution evidence only.
+            predicate = data.get('predicate_evidence')
+            if (mode == 'scope' and len(updates) == 1 and len(change['functions']) == 1
+                    and not change['structural'] and -1 not in scopes and predicate
+                    and statement_spans(original, new)):
+                site = comparison_swap(original, new)
+                group = predicate['keys'].get(f'{path}:{site}') if site else None
+                if group is not None:
+                    agreeing = set(predicate['groups'][group])
+                    remaining = scopes - agreeing
+                    if remaining != scopes:
+                        scopes = remaining
+                        chosen.update(predicate['extra'])
+                        predicate_selected = True
+            if (mode in ('statement', 'scope') and not predicate_selected and not change['structural']
+                    and -1 not in scopes and 'line_evidence' in data):
                 statements = statement_tests(original, new, path, data['line_evidence'])
                 if statements is not None:
                     scopes = statements
@@ -315,5 +334,6 @@ def decide(diff, data, mode='scope'):
             return None, 'unknown'
     if -1 in chosen or (code_changed and not chosen):
         return None, 'shared_or_missing'
-    reason = 'statement' if statement_selected else 'observed' if code_changed else 'comment_only'
+    reason = ('predicate' if predicate_selected else 'statement' if statement_selected
+              else 'observed' if code_changed else 'comment_only')
     return {data['ids'][i] for i in chosen}, reason
