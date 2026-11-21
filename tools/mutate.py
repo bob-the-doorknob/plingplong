@@ -26,6 +26,7 @@ ATTRIBUTES = {
     'attr_hive_date_format': ('sqlglot/dialects/hive.py', '    DATE_FORMAT = "\'yyyy-MM-dd\'"', '    DATE_FORMAT = "\'yyyy-MM\'"'),
     'attr_mysql_tokenizer_quotes': ('sqlglot/dialects/mysql.py', '        QUOTES = ["\'", \'"\']', '        QUOTES = ["\'"]'),
     'attr_hive_tokenizer_escapes': ('sqlglot/dialects/hive.py', '        STRING_ESCAPES = ["\\\\"]', '        STRING_ESCAPES = ["\\\\", "\'"]'),
+    'attr_hive_invalid_escapes': ('sqlglot/dialects/hive.py', '        STRING_ESCAPES = ["\\\\"]', '        STRING_ESCAPES = None'),
     'attr_postgres_parser_json': ('sqlglot/parsers/postgres.py', '    JSON_ARROWS_REQUIRE_JSON_TYPE = True', '    JSON_ARROWS_REQUIRE_JSON_TYPE = False'),
     'attr_hive_parser_log': ('sqlglot/parsers/hive.py', '    LOG_DEFAULTS_TO_LN = True', '    LOG_DEFAULTS_TO_LN = False'),
     'attr_bigquery_parser_functions': ('sqlglot/parsers/bigquery.py', '"BIT_AND": exp.BitwiseAndAgg.from_arg_list,', '"BIT_AND": exp.BitwiseOrAgg.from_arg_list,'),
@@ -54,6 +55,17 @@ COMMENTS = {
     'comment_isolate_table_selects': ['sqlglot/optimizer/isolate_table_selects.py'],
     'comment_mixed': ['sqlglot/generator.py'],
 }
+REPLACEMENTS.update({
+    'registry_trigger_event': [('sqlglot/expressions/ddl.py',
+        'class TriggerEvent(Expression):\n    arg_types = {"this": True, "columns": False}',
+        'class TriggerEvent(Expression):\n    arg_types = {"this": True, "columns": True}')],
+    'registry_in_place': [('sqlglot/expressions/ddl.py',
+        'class TriggerReferencing(Expression):',
+        'TriggerEvent.required_args.add("columns")\n\n\nclass TriggerReferencing(Expression):')],
+    'registry_clone': [('sqlglot/expressions/ddl.py',
+        'class Clone(Expression):\n    arg_types = {"this": True, "shallow": False, "copy": False}',
+        'class Clone(Expression):\n    arg_types = {"this": True, "shallow": True, "copy": False}')],
+})
 REPLACEMENTS['comment_mixed'] = REPLACEMENTS['function']
 
 

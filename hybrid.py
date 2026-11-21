@@ -111,7 +111,7 @@ def class_index(evidence):
             for base in bases:
                 children.setdefault(base, set()).add(cls)
         for key, consumers in evidence['I'].items():
-            imports.setdefault(key.rpartition('@')[0], []).extend(consumers)
+            imports.setdefault(key.rpartition('@')[0], []).append((key, consumers))
         index = evidence['_index'] = (children, imports)
     return index
 
@@ -126,7 +126,7 @@ def family(cls, children):
     return found
 
 
-def holders(cls, attr, body_read, evidence):
+def holders(cls, attr, body_read, evidence, stable_registry_key=False):
     """Classes that may hold state derived from cls.attr at import, or None.
 
     Starts from the consumers of import-time reads of the attribute (or of the
@@ -134,7 +134,7 @@ def holders(cls, attr, body_read, evidence):
     itself. Every holder's import-time reads propagate in turn. A read outside
     any class body or metaclass, at <module> level, cannot be bounded.
     """
-    children, imports = class_index(evidence)
+    _, imports = class_index(evidence)
     found = {cls}
     pending = list(evidence['I'].get(cls + '@' + attr, ())) + list(evidence['I'].get(cls + '@__dict__', ()))
     if body_read:
@@ -148,11 +148,17 @@ def holders(cls, attr, body_read, evidence):
             continue
         processed.add(current)
         found.add(current)
-        pending.extend(imports.get(current, ()))
+        for key, consumers in imports.get(current, ()):
+            # Expr.__init_subclass__ sets key from the class name and derives required_args
+            # separately. EXPR_CLASSES still registers the same class under the same key.
+            if stable_registry_key and key == cls + '@key':
+                pending.extend(consumer for consumer in consumers if consumer != '<module>')
+            else:
+                pending.extend(consumers)
     return found
 
 
-def class_attribute_tests(data, path, changes):
+def class_attribute_tests(data, path, changes, isolated=False):
     """Tests that may observe new values of class-level attributes, or None with a reason.
 
     (a) An attribute read at import, or by the class body itself, selects every
@@ -177,7 +183,12 @@ def class_attribute_tests(data, path, changes):
         written = any(k + '@' + change['attr'] in evidence['W'] for k in family(cls, children))
         if (change['body_read'] or written or attr in evidence['I'] or generic in evidence['I']
                 or attr in evidence['K'] or generic in evidence['K']):
-            found = holders(cls, change['attr'], change['body_read'], evidence)
+            stable_registry_key = (
+                isolated and change.get('boolean_schema') and path.startswith('sqlglot/expressions/')
+                and evidence['M'][cls] == ['sqlglot/expressions/core.py::Expression']
+                and not children.get(cls)
+            )
+            found = holders(cls, change['attr'], change['body_read'], evidence, stable_registry_key)
             if found is None:
                 return None, 'import_module_read'
             for holder in found:
@@ -245,7 +256,11 @@ def decide(diff, data, mode='scope'):
             if change['structural']:
                 if not change.get('class_attributes') or is_core(path):
                     return None, 'structural_or_text'
-                found, reason = class_attribute_tests(data, path, change['class_attributes'])
+                found, reason = class_attribute_tests(
+                    data, path, change['class_attributes'],
+                    isolated=len(updates) == 1 and len(change['class_attributes']) == 1
+                    and not change['functions'],
+                )
                 if found is None:
                     return None, reason
                 chosen.update(found)

@@ -156,3 +156,54 @@ class Selection(unittest.TestCase):
         self.assertEqual(tests_of(base64.b64encode(bits.to_bytes(203, 'little')).decode()), {3, 700})
         self.assertEqual(tests_of([4, 5]), {4, 5})
         self.assertEqual(tests_of(None), set())
+
+class ExpressionRegistry(unittest.TestCase):
+    def test_boolean_flag_keeps_registry_keys_but_other_reads_still_fall_back(self):
+        path = 'sqlglot/expressions/example.py'
+        old = 'class Example(Expression):\n    arg_types = {"this": True, "optional": False}\n'
+        new = old.replace('False', 'True')
+        cls = path + '::Example'
+        evidence = data(
+            M={cls: ['sqlglot/expressions/core.py::Expression']},
+            R={cls: [1, 2]},
+            I={cls + '@arg_types': [cls], cls + '@key': ['<module>']},
+        )
+        evidence['sources'] = {path: old}
+        self.assertEqual(decide(git_patch({path: (old, new)}), evidence), (names(0, 1, 2), 'observed'))
+        subclass = copy.deepcopy(evidence)
+        subclass['classes'].pop('_index', None)
+        subclass['classes']['M'][CUSTOM] = [cls]
+        self.assertEqual(decide(git_patch({path: (old, new)}), subclass), (None, 'import_module_read'))
+
+        transitive = copy.deepcopy(evidence)
+        transitive['classes'].pop('_index', None)
+        transitive['classes']['I'][cls + '@arg_types'].append(OTHER)
+        transitive['classes']['I'][OTHER + '@derived'] = ['<module>']
+        self.assertEqual(decide(git_patch({path: (old, new)}), transitive), (None, 'import_module_read'))
+
+        for field in ('arg_types', 'required_args', '__dict__'):
+            expanded = copy.deepcopy(evidence)
+            expanded['classes'].pop('_index', None)
+            expanded['classes']['I'][cls + '@' + field] = ['<module>']
+            self.assertEqual(decide(git_patch({path: (old, new)}), expanded), (None, 'import_module_read'))
+
+    def test_registry_proof_requires_simple_literal_edit(self):
+        path = 'sqlglot/expressions/example.py'
+        cls = path + '::Example'
+        evidence = data(
+            M={cls: ['sqlglot/expressions/core.py::Expression']},
+            R={cls: [1]},
+            I={cls + '@arg_types': [cls], cls + '@key': ['<module>']},
+        )
+        old = 'class Example(Expression):\n    arg_types = {"this": True, "optional": False}\n'
+        evidence['sources'] = {path: old}
+        for new in (old.replace('optional', 'other'), old.replace('False', '1 / 0')):
+            self.assertIsNone(decide(git_patch({path: (old, new)}), evidence)[0])
+
+    def test_import_fallback_for_literal_replaced_with_runtime_expression(self):
+        self.assertEqual(run(OLD.replace('SETTING = 1', 'SETTING = 1 / 0')),
+                         (None, 'structural_or_text'))
+
+    def test_import_fallback_for_literal_type_change(self):
+        self.assertEqual(run(OLD.replace('SETTING = 1', 'SETTING = None')),
+                         (None, 'structural_or_text'))
