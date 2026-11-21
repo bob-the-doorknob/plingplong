@@ -457,3 +457,22 @@ optimizer-only probe produced 57 unchanged expression graphs at 2.401 s
 CPU, compared with 2.991 s for the original. This measures a bounded stage.
 The probe does not reproduce executor input serialization, plan execution
 or the DuckDB comparison. It supplies no exclusion evidence to production.
+
+P10-D uses the submitting test ID inside each worker task. Startup and exit
+records must match, and both suite orders must show attributable SQLGlot
+execution in the optimizer and executor pools. Worker initialization still
+uses the test-file context. Line selection and operand agreement apply
+independently, and ambiguous tests retain their separate protection.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-D line only | 214.161 | Unmeasured | Unmeasured | 0 | 60.70 |
+| P10-D integrated | 169.621 | 0.940 | 170.561 | 0 | 56.13 |
+
+P10-C is 832d0529c6528f1b01bc1ca2835788dbd81b3ed6. The P10-D line map is
+283635 bytes. Both WSL Make targets passed, as did three identical 8620-byte
+restricted runs. Peak RSS was 72884 KiB and maximum selector wall time 0.996 s.
+The independent mutation matrix retained every labeled failure.
+The fresh-table copy experiment was kept out of this candidate. Its first
+trial saved 0.156 simulated seconds, and review identified constructor
+wrapping as a possible escape of the otherwise fresh object.

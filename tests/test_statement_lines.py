@@ -97,3 +97,37 @@ class ComparisonSwap(unittest.TestCase):
         self.assertFalse(tracer.observations['unknown'][tracer.trace_events.context])
         self.assertFalse(tracer.compare(object(), None, 'native', 'Is'))
         self.assertTrue(tracer.observations['native'][tracer.trace_events.context])
+
+    def test_line_and_operand_evidence_can_both_narrow_the_same_patch(self):
+        from test_class_attributes import git_patch
+        from hybrid import decide
+        path = 'sqlglot/example.py'
+        old = 'def f(a):\n    if a is None:\n        return 1\n'
+        patch = git_patch({path: (old, old.replace('is None', '== None'))})
+        evidence = {
+            'ids': ['agree', 'never_reached', 'disagree', 'untraced'],
+            'sources': {path: old},
+            'hits': {path+'::f': [0, 1, 2], '!untraced': [3]},
+            'line_evidence': {'files': {path: {'2': 0}}, 'groups': [[0, 2]], 'extra': []},
+            'predicate_evidence': {'keys': {path+':2:7': 0}, 'groups': [[0]], 'extra': []},
+        }
+        self.assertEqual(decide(patch, evidence), ({'disagree','untraced'}, 'predicate'))
+
+    def test_process_pool_tasks_restore_the_previous_context_after_an_error(self):
+        import importlib
+        import sys
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with patch.object(sys, 'path', [str(Path('tools').resolve()), *sys.path]):
+            tracer = importlib.import_module('trace_predicates')
+        history = []
+
+        def fail():
+            raise RuntimeError('example')
+
+        with patch.object(tracer.trace_events, 'context', 'tests/example.py'), \
+             patch.object(tracer.trace_events, 'owner', history.append):
+            with self.assertRaisesRegex(RuntimeError, 'example'):
+                tracer.run_labeled('tests/example.py::test_one', fail, (), {})
+        self.assertEqual(history, ['tests/example.py::test_one', 'tests/example.py'])

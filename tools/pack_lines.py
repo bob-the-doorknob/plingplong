@@ -29,7 +29,7 @@ for order in ('0', '1'):
         extra.update(owners[name])
 
 observed = defaultdict(lambda: defaultdict(set))
-child_files = set()
+attributed_workers = {order: set() for order in ("0", "1")}
 shards = {p.name: p for p in Path('/tmp/lines').glob('*.json')}
 startup = {p.name: json.loads(p.read_text()) for p in Path('/tmp/line-started').glob('*.json')}
 assert shards.keys() == startup.keys()
@@ -45,10 +45,13 @@ for shard in shards.values():
                 if context not in catalog['skipped']:
                     observed[path][int(line)].update(owners[context])
                     shard_owners.add(context)
-    nonshared = shard_owners - {'*'}
-    if len(nonshared) == 1 and '::' not in next(iter(nonshared)):
-        child_files.update(nonshared)
-assert set(baseline['child_files']) <= child_files, child_files
+    process = startup[shard.name]
+    file = process['owner']
+    if file in baseline['child_files'] and any(owner.startswith(file + '::') for owner in shard_owners):
+        attributed_workers[process['order']].add(file)
+for files_seen in attributed_workers.values():
+    assert set(baseline['child_files']) <= files_seen, files_seen
+child_files = set(baseline['child_files'])
 
 groups = {}
 files = {}

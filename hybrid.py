@@ -305,26 +305,30 @@ def decide(diff, data, mode='scope'):
                 if key not in hits:
                     return None, 'unobserved_scope'
                 scopes.update(hits[key])
-            # A swap observed on native slots can narrow execution evidence only.
-            predicate = data.get('predicate_evidence')
-            if (mode == 'scope' and len(updates) == 1 and len(change['functions']) == 1
-                    and not change['structural'] and -1 not in scopes and predicate
-                    and statement_spans(original, new)):
-                site = comparison_swap(original, new)
-                group = predicate['keys'].get(f'{path}:{site}') if site else None
-                if group is not None:
-                    agreeing = set(predicate['groups'][group])
-                    remaining = scopes - agreeing
-                    if remaining != scopes:
-                        scopes = remaining
-                        chosen.update(predicate['extra'])
-                        predicate_selected = True
-            if (mode in ('statement', 'scope') and not predicate_selected and not change['structural']
-                    and -1 not in scopes and 'line_evidence' in data):
-                statements = statement_tests(original, new, path, data['line_evidence'])
+            if mode in ('statement', 'scope') and not change['structural'] and -1 not in scopes:
+                lines = data.get('line_evidence')
+                statements = statement_tests(original, new, path, lines) if lines else None
                 if statements is not None:
                     scopes = statements
+                    chosen.update(lines['extra'])
                     statement_selected = True
+
+                # Use agreement only for the same isolated expression edit. Imports,
+                # source readers and ambiguous tests have already entered chosen.
+                predicate = data.get('predicate_evidence')
+                if (mode == 'scope' and len(updates) == 1 and len(change['functions']) == 1
+                        and predicate and ('==' in diff or '!=' in diff)
+                        and re.search(r'\bis\b', diff)
+                        and (statements is not None or statement_spans(original, new))):
+                    site = comparison_swap(original, new)
+                    group = predicate['keys'].get(f'{path}:{site}') if site else None
+                    if group is not None:
+                        agreeing = set(predicate['groups'][group])
+                        remaining = scopes - agreeing
+                        if remaining != scopes:
+                            scopes = remaining
+                            chosen.update(predicate['extra'])
+                            predicate_selected = True
             chosen.update(scopes)
             if mode == 'file':
                 for key, ids in hits.items():
