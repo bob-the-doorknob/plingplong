@@ -231,3 +231,31 @@ Pinned SQLGlot with Python 3.13.18 passed 1620 numbered tests and 25440 subtests
 The final 13 fallbacks comprise eight structural or textual Python edits, three unsupported diffs, one shared or missing observation and one fixture text edit. Largest selection was 1620. Worst simulated commit cost was 36.817 seconds. Two complete independently mutated suites yielded 37 failing IDs for the serialization mutation and one for the optimizer fixture mutation. All were selected, among 184 and four candidates respectively.
 
 36 project tests passed. WSL make sample passed under the official isolation flags. Three restricted container repeats produced identical 98319-byte stdout, median selector CPU 0.436 seconds, maximum peak RSS 48396 KiB and wall time below 0.49 seconds per selector. Local simulated time improved by 459.784 seconds (41.63%). This candidate awaits user authorization for a practice leaderboard run. The accepted competition entry remains the previous revision.
+
+## Phase 6: finer scopes and fixture comments - 2026-11-21
+
+Baseline reproduced at 09f90b6 on macOS arm64 (host Python 3.14.7): 36 tests passed, 644.726 s, zero misses.
+
+Changes, both general rules with no sample identifiers:
+
+- semantic.py: nested functions and lambdas are scopes keyed by CPython co_qualname. All 3691 split names in the 215 pinned files were verified to be real code object qualified names. This narrows a nested closure whose factory runs at import time, and a lambda in a class-level table.
+- hybrid.py: an SQL fixture that contains a block comment no longer falls back unless an edited line holds a delimiter. Unterminated block comments are stripped to the end of the file.
+
+| Public sample variant | Simulated seconds | Missed commits | Mean tests | Full fallbacks |
+| --- | ---: | ---: | ---: | ---: |
+| 09f90b6 hybrid | 644.726 | 0 | 746.97 | 13 |
+| Phase 6 hybrid | 542.644 | 0 | 585.47 | 10 |
+
+43 project tests passed. make sample passed with the official flags: 542.644 s, zero misses, and make check printed format ok. SAMPLE and OUTPUT were overridden to a path without spaces, because the Makefile does not quote the volume paths and this checkout path contains spaces and an ampersand. Container stdout was 77392 bytes, byte-identical to the host benchmark and across three restricted runs. Under amd64 emulation on arm64 the median selector CPU was 0.756 s, against 0.594 s for 09f90b6 on the same setup. Peak RSS was 57684 KiB. Emulated CPU is higher than native amd64.
+
+Five full-suite mutations in the trace image (SKIP_INTEGRATION=0). All failures were selected by tools/check_mutations.py:
+
+| Case | Target | Failing IDs | Selected |
+| --- | --- | ---: | ---: |
+| function | serde.py body | 37 | 184 |
+| fixture | eliminate_joins.sql | 1 | 4 |
+| lambda | SQLiteGenerator TRANSFORMS lambda | 2 | 11 |
+| nested | build_regexp_extract.<locals>._builder | 2 | 121 |
+| block_fixture | qualify_columns.sql, which has block comments | 1 | 4 |
+
+The remaining 10 fallbacks are as follows. Three are comment-only patches. Three multi-file patches each include a comment-only Python file. AGENTS.md requires all tests for comment-only changes, so these six were left unchanged. Four are class-level constants or import-time call arguments. Narrowing those needs evidence of attribute reads. Static load-name readers alone are not enough: the dialect metaclass and class bodies read many such attributes at import time, and there are 22 dynamic getattr, dir, vars or __dict__ sites that need an audit.

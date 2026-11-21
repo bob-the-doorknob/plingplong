@@ -1,4 +1,5 @@
 """Patch reconstruction and selection against the pinned, read-only evidence."""
+import difflib
 import gzip
 import json
 import re
@@ -57,6 +58,28 @@ def apply_patch(diff, sources):
     return patched
 
 
+BLOCK_DELIMITER = re.compile(r'/\*|\*/')
+
+
+def touches_block_comment(old, new):
+    """True when an edited line holds a block-comment delimiter.
+
+    Otherwise both versions share the same delimiter sequence, so block-comment
+    spans match on both sides and removing them cannot hide a comment edit.
+    """
+    before, after = old.splitlines(), new.splitlines()
+    matcher = difflib.SequenceMatcher(None, before, after, autojunk=False)
+    return any(BLOCK_DELIMITER.search(line)
+               for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != 'equal'
+               for line in before[i1:i2] + after[j1:j2])
+
+
+def sql_without_comments(text):
+    """Over-approximate comment removal; a comment-only edit always compares equal."""
+    text = re.sub(r'/\*.*?(?:\*/|\Z)', '', text, flags=re.S)
+    return re.sub(r'\s+', '', re.sub(r'(?m)(?:--|#).*$', '', text))
+
+
 def load(tests):
     try:
         data = json.loads(gzip.decompress(Path(__file__).with_name('evidence.gz').read_bytes()))
@@ -81,10 +104,8 @@ def decide(diff, data, mode='scope'):
         readers = hits.get(path, [])
         chosen.update(readers)
         if path.startswith('tests/fixtures/') and path.endswith('.sql'):
-            original = data['sources'][path]
-            def executable(text):
-                return re.sub(r'\s+', '', re.sub(r'(?m)(?:--|#).*$', '', text))
-            if '/*' in original or '/*' in new or executable(original) == executable(new):
+            if touches_block_comment(data['sources'][path], new) or (
+                    sql_without_comments(data['sources'][path]) == sql_without_comments(new)):
                 return None, 'fixture_text'
             if not readers:
                 return None, 'unobserved_fixture'

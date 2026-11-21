@@ -10,7 +10,7 @@ from hybrid import load, decide
 manifest = json.loads((ROOT/'blast-radius-sample/sample/tests.json').read_text())['tests']
 index = load(manifest)
 assert index
-for case in ('function', 'fixture'):
+for case in ('function', 'fixture', 'lambda', 'nested', 'block_fixture'):
     path = ROOT/'.phase5'/case
     failures = set(json.loads(path.with_suffix('.json').read_text()))
     selected, reason = decide(path.with_suffix('.patch').read_text(), index)
