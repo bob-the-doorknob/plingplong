@@ -50,3 +50,69 @@ class FixtureComments(unittest.TestCase):
         for old, new in cases:
             with self.subTest(old=old, new=new):
                 self.assertIsNone(self.decide(old, new)[0])
+
+
+def git_patch(changes):
+    import difflib
+    out = []
+    for path, (old, new) in changes.items():
+        out.append(f'diff --git a/{path} b/{path}\n')
+        out.extend(difflib.unified_diff(old.splitlines(True), new.splitlines(True), 'a/' + path, 'b/' + path))
+    return ''.join(out)
+
+
+class CommentOnly(unittest.TestCase):
+    A, B = 'sqlglot/a.py', 'sqlglot/b.py'
+    OLD_A = 'import os\n\n\ndef f():\n    """Doc."""\n    return "a"\n\n\nX = "x"\n'
+    OLD_B = 'def g():\n    return 1\n'
+
+    def data(self, **extra):
+        hits = {'!untraced': [0], self.A + '::f': [1], self.B + '::g': [2]}
+        hits.update(extra)
+        return {'ids': ['t0', 't1', 't2', 't3', 't4'], 'sources': {self.A: self.OLD_A, self.B: self.OLD_B}, 'hits': hits}
+
+    def decide_a(self, new, data=None):
+        return decide(git_patch({self.A: (self.OLD_A, new)}), data or self.data())
+
+    def test_comment_on_line_one_selects_readers_and_untraced(self):
+        new = '# note\n' + self.OLD_A
+        self.assertEqual(self.decide_a(new), ({'t0'}, 'comment_only'))
+        self.assertEqual(self.decide_a(new, self.data(**{self.A: [3]})), ({'t0', 't3'}, 'comment_only'))
+
+    def test_comment_inside_function(self):
+        new = self.OLD_A.replace('    return "a"', '    # inner\n    return "a"  # trailing')
+        self.assertEqual(self.decide_a(new, self.data(**{self.A: [3]})), ({'t0', 't3'}, 'comment_only'))
+
+    def test_multi_file_comment_does_not_force_fallback(self):
+        patch = git_patch({self.A: (self.OLD_A, '# note\n' + self.OLD_A),
+                           self.B: (self.OLD_B, self.OLD_B.replace('1', '2'))})
+        self.assertEqual(decide(patch, self.data(**{self.A: [3]})), ({'t0', 't2', 't3'}, 'observed'))
+        unobserved = self.data()
+        del unobserved['hits'][self.B + '::g']
+        self.assertEqual(decide(patch, unobserved), (None, 'unobserved_scope'))
+
+    def test_hash_inside_strings_is_code(self):
+        self.assertEqual(self.decide_a(self.OLD_A.replace('return "a"', 'return "a # b"')), ({'t0', 't1'}, 'observed'))
+        self.assertEqual(self.decide_a(self.OLD_A.replace('"""Doc."""', '"""Doc. # b"""'))[0], None)
+        self.assertEqual(self.decide_a(self.OLD_A.replace('X = "x"', 'X = "x # y"')), (None, 'structural_or_text'))
+
+    def test_all_comment_only_without_evidence_selects_nothing(self):
+        data = self.data()
+        data['hits']['!untraced'] = []
+        self.assertEqual(self.decide_a('# note\n' + self.OLD_A, data), (set(), 'comment_only'))
+
+    def test_shared_reader_falls_back(self):
+        self.assertEqual(self.decide_a('# note\n' + self.OLD_A, self.data(**{self.A: [-1]})), (None, 'shared_or_missing'))
+
+    def test_encoding_cookie_falls_back(self):
+        for new in ['# -*- coding: latin-1 -*-\n' + self.OLD_A, '#!/usr/bin/env python\n# vim: set fileencoding=utf-8\n' + self.OLD_A]:
+            with self.subTest(new=new[:30]):
+                self.assertEqual(self.decide_a(new), (None, 'encoding_cookie'))
+        data = self.data()
+        data['sources'][self.A] = 'import os\n# coding=utf-8\n' + self.OLD_A[len('import os\n'):]
+        patch = git_patch({self.A: (data['sources'][self.A], data['sources'][self.A] + '# tail\n')})
+        self.assertEqual(decide(patch, data), (None, 'encoding_cookie'))
+
+    def test_reconstruction_failure_falls_back(self):
+        patch = git_patch({self.A: (self.OLD_A.replace('os', 'sys'), '# note\n' + self.OLD_A.replace('os', 'sys'))})
+        self.assertEqual(decide(patch, self.data()), (None, 'unsupported_diff'))

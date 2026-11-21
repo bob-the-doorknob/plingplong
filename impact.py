@@ -55,8 +55,13 @@ def build_index(root: Path) -> dict:
     return {'files': modules, 'reverse': {m: sorted(users) for m, users in sorted(reverse.items())}, 'complete': complete}
 
 
-def changed_files(diff: str) -> set[str] | None:
-    """Accept ordinary same-path textual Git diffs; everything else falls back."""
+def changed_files(diff: str, require_code: bool = True) -> set[str] | None:
+    """Accept ordinary same-path textual Git diffs; everything else falls back.
+
+    With require_code, a diff whose changed lines are all blank or start with
+    '#' also falls back. The hybrid selector disables this textual check and
+    decides comment-only edits on the AST instead.
+    """
     lines = diff.splitlines()
     paths, changed = set(), []
     i = 0
@@ -96,7 +101,7 @@ def changed_files(diff: str) -> set[str] | None:
         if not hunks:
             return None
         paths.add(path)
-    if not paths or not any(line and not line.startswith('#') for line in changed):
+    if not paths or (require_code and not any(line and not line.startswith('#') for line in changed)):
         return None
     return paths
 
