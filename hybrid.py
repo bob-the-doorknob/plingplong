@@ -11,6 +11,7 @@ from pathlib import Path
 from impact import changed_files
 from semantic import classify_change, statement_spans
 from predicate import comparison_swap
+from numeric import ATTRIBUTE, DECODER, decoder_sites, numeric_radix_edit
 
 PIN = 'eb11aec4be8cb2122afe713a4816662c3f0fb2fa'
 
@@ -208,6 +209,52 @@ def class_attribute_tests(data, path, changes, isolated=False):
     return chosen, 'observed'
 
 
+def numeric_escape_tests(data, path, old, new, change):
+    """Select numeric decoder users when a literal map's import-time keys stay fixed."""
+    if change['attr'] != ATTRIBUTE or change['body_read'] or not path.startswith('sqlglot/dialects/'):
+        return None
+    evidence = data.get('classes')
+    lines = data.get('line_evidence')
+    if not evidence or not lines or DECODER not in lines['files']:
+        return None
+    cls = path + '::' + change['cls']
+    children, _ = class_index(evidence)
+    if cls not in family('sqlglot/tokens.py::Tokenizer', children):
+        return None
+    if not numeric_radix_edit(old, new, change['cls']):
+        return None
+    members = family(cls, children)
+    # The pinned dialect initializer uses only key presence. Unknown consumers,
+    # reassignment or reflection during other class construction retain the full
+    # class-based analysis.
+    for member in members:
+        attr, generic = member + '@' + ATTRIBUTE, member + '@__dict__'
+        if attr in evidence['W'] or generic in evidence['W']:
+            return None
+        if any(not owner.startswith('sqlglot/dialects/') for owner in evidence['I'].get(attr, ())):
+            return None
+        if any(owner not in members for owner in evidence['I'].get(generic, ())):
+            return None
+
+    sites = decoder_sites(data['sources'][DECODER])
+    if len(sites) != 2:
+        return None
+    readers = set()
+    for line, scope in sites:
+        group = lines['files'][DECODER].get(str(line))
+        if group is not None:
+            readers.update(lines['groups'][group])
+        else:
+            # A byte decoder may never be entered in the pinned suite. Keep its
+            # existing function evidence whenever exact line evidence is absent.
+            readers.update(data['hits'].get(DECODER + '::' + scope, ()))
+    if not readers or -1 in readers:
+        return None
+    for member in members:
+        readers.update(tests_of(evidence['A'].get(member + '@__dict__')))
+    return readers | set(lines['extra'])
+
+
 def load(tests):
     try:
         base = Path(__file__).with_name('evidence.gz').read_bytes()
@@ -259,6 +306,7 @@ def decide(diff, data, mode='scope'):
     code_changed = False
     statement_selected = False
     predicate_selected = False
+    numeric_selected = False
     for path, new in updates.items():
         readers = hits.get(path, [])
         chosen.update(readers)
@@ -288,11 +336,15 @@ def decide(diff, data, mode='scope'):
             if change['structural']:
                 if not change.get('class_attributes') or is_core(path):
                     return None, 'structural_or_text'
-                found, reason = class_attribute_tests(
-                    data, path, change['class_attributes'],
-                    isolated=len(updates) == 1 and len(change['class_attributes']) == 1
-                    and not change['functions'],
-                )
+                isolated = len(updates) == 1 and len(change['class_attributes']) == 1 and not change['functions']
+                found = None
+                if mode == 'scope' and isolated:
+                    found = numeric_escape_tests(data, path, original, new, change['class_attributes'][0])
+                if found is not None:
+                    numeric_selected = True
+                    reason = 'numeric_values'
+                else:
+                    found, reason = class_attribute_tests(data, path, change['class_attributes'], isolated)
                 if found is None:
                     return None, reason
                 chosen.update(found)
@@ -338,6 +390,6 @@ def decide(diff, data, mode='scope'):
             return None, 'unknown'
     if -1 in chosen or (code_changed and not chosen):
         return None, 'shared_or_missing'
-    reason = ('predicate' if predicate_selected else 'statement' if statement_selected
+    reason = ('numeric_values' if numeric_selected else 'predicate' if predicate_selected else 'statement' if statement_selected
               else 'observed' if code_changed else 'comment_only')
     return {data['ids'][i] for i in chosen}, reason

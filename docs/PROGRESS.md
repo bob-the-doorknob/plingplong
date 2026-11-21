@@ -476,3 +476,24 @@ The independent mutation matrix retained every labeled failure.
 The fresh-table copy experiment was kept out of this candidate. Its first
 trial saved 0.156 simulated seconds, and review identified constructor
 wrapping as a possible escape of the otherwise fresh object.
+
+P10-E narrows an isolated radix edit to one existing entry in a literal
+NUMERIC_ESCAPES map. The pinned import and generation sites use key
+membership or truthiness. Reads of the radix occur only in the tokenizer's
+two numeric helpers. Missing scope coverage, shared reads, unfamiliar
+initializers, reflective readers and runtime attribute writes retain
+conservative coverage. The change uses original source and line/function
+evidence across all dialects and never reverse engineers the failing IDs.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-E | 159.754 | 0.891 | 160.645 | 0 | 40.40 |
+
+P10-D is 0144122cb13a27f1e446d18cfc1875b0e67e8aa1. E passed 82 unit tests,
+both Make targets and three identical 6533-byte runs. Peak RSS was 73140
+KiB and maximum selector wall time 0.952 s. Five separate numeric mutations
+completed and retained all observed failures. DuckDB, Snowflake and
+ClickHouse selected via the new rule, with no observed failing tests. Spark
+and the failing Postgres case retained class-based selection. Review found
+no pinned reflection or persistent cache of decoded results. Cross-test
+state remains an empirical assumption.
