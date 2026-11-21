@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 import time
 
-from hybrid import decide, load
+from hybrid import apply_patch, decide, load
+from semantic import classify_change
 from score import evaluate_run
 import selector
 
@@ -33,7 +34,7 @@ def main():
             counts.append(sum(map(len,workers)))
             if details and mode == 'scope':
                 makespan = max((sum(durations[n] for n in w) for w in workers), default=0)
-                largest = sorted((n for w in workers for n in w), key=lambda n: (-durations[n], n))[:3]
+                largest = sorted((n for w in workers for n in w), key=lambda n: (-durations[n], n))[:5]
                 breakdown.append((makespan + 2000 * len(workers), patch.stem, counts[-1],
                                   len(workers), makespan, reason, largest))
             rows.append(json.dumps(dict(commit=patch.stem,workers=workers),separators=(',',':')))
@@ -48,6 +49,23 @@ def main():
                 print(f'{commit}: cost={cost / 1000:.3f}s makespan={makespan / 1000:.3f}s '
                       f'workers={workers} tests={count} reason={reason} '
                       f'longest={[(tests[n]["id"], durations[n]) for n in largest]}')
+                diff = (SAMPLE/'commits'/f'{commit}.patch').read_text(encoding='utf-8')
+                try:
+                    sources = apply_patch(diff, evidence['sources'])
+                except ValueError:
+                    continue
+                for path, new in sources.items():
+                    hits = evidence['hits']
+                    if path.endswith('.py'):
+                        change = classify_change(evidence['sources'][path], new)
+                        scopes = {name: len(hits.get(path + '::' + name, []))
+                                  for name in change['functions']}
+                        attributes = change.get('class_attributes') or []
+                    else:
+                        scopes, attributes = {}, []
+                    print(f'  {path} readers={len(hits.get(path, []))} '
+                          f'importers={len(hits.get(path + "::@importers", []))} '
+                          f'scopes={scopes} class_attributes={attributes}')
 
 
 if __name__ == '__main__':

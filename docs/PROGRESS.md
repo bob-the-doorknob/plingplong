@@ -389,3 +389,18 @@ a harness syntax error. Reproduce any case with the commands in README.md.
 | registry_clone | Registry state | 0 | 0 | 7 | 2.946 | observed | None |
 | registry_in_place | Registry state | 1 | 7 | 1620 | 36.817 | structural_or_text | None |
 | registry_trigger_event | Registry state | 1 | 7 | 10 | 2.480 | observed | None |
+
+## Phase 10 checkpoints
+
+| Checkpoint | SHA | Simulated (s) | Median CPU (s) | Public misses | Mean tests | Status |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Phase 9 | 126d08304548e3aadff3c285ab5d4db40ed9d66c | 236.606 | 0.699 | 0 | 80.97 | Verified baseline |
+| P10-A | See baseline profiling commit | 236.606 | 0.767 | 0 | 80.97 | Reproduced |
+
+P10-A ran 69 tests, make sample, make check and three identical restricted
+runs. Maximum peak RSS was 54328 KiB and maximum selector wall time 0.892 s.
+Three patches cost 27.454 s each, followed by 25.454 s and 16.155 s. The first
+four select TPC-DS at 21.454 s. The fifth uses 498 tests and has an 8.155 s
+makespan. See benchmark.py --details for per-patch evidence. The plan is to
+collect independent line coverage, score narrow statement edits, then use
+measured costs to decide whether runtime probes merit an experiment.
