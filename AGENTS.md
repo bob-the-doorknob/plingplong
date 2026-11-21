@@ -10,6 +10,12 @@
   tests, and never forces a full fallback of a multi-file patch. Shared readers,
   failed reconstruction or coding[:=] on lines 1-2 still select all tests. SQL
   fixture comment-only edits still select all tests.
+- Structural edits narrow only when they are class-level assignment values in a
+  non-core file (not parser.py, generator.py, tokens.py, dialects/dialect.py,
+  expressions/core.py or any __init__.py), using traced attribute reads. Import
+  reads, class-body reads, runtime class writes and cache-changing readers widen
+  to every test touching a holder class; <module> reads or missing evidence
+  select all tests.
 - Runtime: offline, read-only, nobody, HOME=/tmp, 64 MB tmp, 2 CPUs, 4 GB RAM,
   max 256 processes, 3 minute timeout (4.5 final), stdout <=2 MB.
 - Build: 4 CPUs, 8 GB, 10 minutes; allowed registries/fixed releases/pinned SQLGlot

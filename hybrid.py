@@ -1,4 +1,5 @@
 """Patch reconstruction and selection against the pinned, read-only evidence."""
+import base64
 import difflib
 import gzip
 import json
@@ -82,6 +83,118 @@ def sql_without_comments(text):
     return re.sub(r'\s+', '', re.sub(r'(?m)(?:--|#).*$', '', text))
 
 
+# Shared machinery: structural edits here always select the full suite.
+CORE = frozenset({'sqlglot/parser.py', 'sqlglot/generator.py', 'sqlglot/tokens.py',
+                  'sqlglot/dialects/dialect.py', 'sqlglot/expressions/core.py'})
+
+
+def is_core(path):
+    return path in CORE or path.endswith('/__init__.py')
+
+
+def tests_of(encoded):
+    """Decode an index list, or a base64 little-endian bitset for large sets."""
+    if encoded is None:
+        return set()
+    if isinstance(encoded, list):
+        return set(encoded)
+    bits = int.from_bytes(base64.b64decode(encoded), 'little')
+    return {i for i in range(bits.bit_length()) if bits >> i & 1}
+
+
+def class_index(evidence):
+    """Subclass and import-read lookups, built once per loaded index."""
+    index = evidence.get('_index')
+    if index is None:
+        children, imports = {}, {}
+        for cls, bases in evidence['M'].items():
+            for base in bases:
+                children.setdefault(base, set()).add(cls)
+        for key, consumers in evidence['I'].items():
+            imports.setdefault(key.rpartition('@')[0], []).extend(consumers)
+        index = evidence['_index'] = (children, imports)
+    return index
+
+
+def family(cls, children):
+    found, pending = set(), [cls]
+    while pending:
+        current = pending.pop()
+        if current not in found:
+            found.add(current)
+            pending.extend(children.get(current, ()))
+    return found
+
+
+def holders(cls, attr, body_read, evidence):
+    """Classes that may hold state derived from cls.attr at import, or None.
+
+    Starts from the consumers of import-time reads of the attribute (or of the
+    class __dict__); a class whose own body reads the name holds derived state
+    itself. Every holder's import-time reads propagate in turn. A read outside
+    any class body or metaclass, at <module> level, cannot be bounded.
+    """
+    children, imports = class_index(evidence)
+    found = {cls}
+    pending = list(evidence['I'].get(cls + '@' + attr, ())) + list(evidence['I'].get(cls + '@__dict__', ()))
+    if body_read:
+        pending.append(cls)
+    processed = set()
+    while pending:
+        current = pending.pop()
+        if current == '<module>':
+            return None
+        if current in processed:
+            continue
+        processed.add(current)
+        found.add(current)
+        pending.extend(imports.get(current, ()))
+    return found
+
+
+def class_attribute_tests(data, path, changes):
+    """Tests that may observe new values of class-level attributes, or None with a reason.
+
+    (a) An attribute read at import, or by the class body itself, selects every
+    test that touched a holder of derived state or one of its subclasses.
+    (b) Otherwise the runtime readers of the attribute, found through the
+    class that provides it, are selected. Runtime class writes and tests that
+    changed sqlglot caches turn (b) into (a), since later tests may reuse
+    state built from the attribute.
+    (c) Classes without evidence and attributes no test read fall back.
+    """
+    evidence = data.get('classes')
+    if not evidence:
+        return None, 'class_evidence'
+    children = class_index(evidence)[0]
+    receivers, reads = evidence['R'], evidence['A']
+    chosen = set()
+    for change in changes:
+        cls = path + '::' + change['cls']
+        if cls not in evidence['M'] or cls not in receivers:
+            return None, 'unobserved_class'
+        attr, generic = cls + '@' + change['attr'], cls + '@__dict__'
+        written = any(k + '@' + change['attr'] in evidence['W'] for k in family(cls, children))
+        if (change['body_read'] or written or attr in evidence['I'] or generic in evidence['I']
+                or attr in evidence['K'] or generic in evidence['K']):
+            found = holders(cls, change['attr'], change['body_read'], evidence)
+            if found is None:
+                return None, 'import_module_read'
+            for holder in found:
+                if holder.startswith('tests/'):
+                    prefix = holder + '::'
+                    chosen.update(i for i, name in enumerate(data['ids']) if name.startswith(prefix))
+                    continue
+                for member in family(holder, children):
+                    chosen |= tests_of(receivers.get(member))
+        else:
+            readers = tests_of(reads.get(attr)) | tests_of(reads.get(generic))
+            if not readers:
+                return None, 'unobserved_attribute'
+            chosen |= readers
+    return chosen, 'observed'
+
+
 def load(tests):
     try:
         data = json.loads(gzip.decompress(Path(__file__).with_name('evidence.gz').read_bytes()))
@@ -115,7 +228,9 @@ def decide(diff, data, mode='scope'):
                 return None, 'unobserved_fixture'
         elif path.startswith('sqlglot/') and path.endswith('.py'):
             original = data['sources'][path]
-            if any(ENCODING_COOKIE.search(line) for text in (original, new) for line in text.splitlines()[:2]):
+            # Python ends lines only at \r\n, \r or \n; str.splitlines also splits at \x0c, \x85, ...
+            if any(ENCODING_COOKIE.search(line) for text in (original, new)
+                   for line in re.split(r'\r\n|\r|\n', text, maxsplit=2)[:2]):
                 return None, 'encoding_cookie'
             try:
                 compile(new, path, 'exec', dont_inherit=True)
@@ -127,7 +242,14 @@ def decide(diff, data, mode='scope'):
                 # so only tests that read this source as text can observe it.
                 continue
             code_changed = True
-            if change['structural'] or not change['functions']:
+            if change['structural']:
+                if not change.get('class_attributes') or is_core(path):
+                    return None, 'structural_or_text'
+                found, reason = class_attribute_tests(data, path, change['class_attributes'])
+                if found is None:
+                    return None, reason
+                chosen.update(found)
+            elif not change['functions']:
                 return None, 'structural_or_text'
             chosen.update(hits.get(path + '::@importers', ()))
             for name in change['functions']:

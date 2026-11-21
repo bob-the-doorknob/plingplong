@@ -15,7 +15,15 @@ for case in cases:
     path = ROOT/'.phase5'/case
     failures = set(json.loads(path.with_suffix('.json').read_text()))
     selected, reason = decide(path.with_suffix('.patch').read_text(), index)
+    if case.startswith('base_'):
+        # Core base-class edits must select the full suite.
+        assert selected is None, (case, reason)
+        print(case, reason, len(failures), 'failures, full suite')
+        continue
+    if selected is None and case.startswith('attr_'):
+        print(case, reason, len(failures), 'failures, full suite')
+        continue
     # A comment-only mutation may break nothing; that is evidence a small selection is safe.
-    assert selected is not None and (failures or case.startswith('comment_')), (case, reason)
+    assert selected is not None and (failures or case.startswith(('comment_', 'attr_'))), (case, reason)
     assert failures <= selected, (case, sorted(failures-selected))
     print(case, reason, len(failures), 'failures retained among', len(selected), 'selected')

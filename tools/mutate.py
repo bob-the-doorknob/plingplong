@@ -17,6 +17,28 @@ REPLACEMENTS = {
     'block_fixture': [('tests/fixtures/optimizer/qualify_columns.sql', 'SELECT x."a" AS "a" FROM x AS x;',
                        'SELECT x."b" AS "a" FROM x AS x;')],
 }
+# Class-level attribute values: dialect, tokenizer, parser, generator settings and
+# expression arg_types, plus two base classes in core files that must fall back.
+ATTRIBUTES = {
+    'attr_duckdb_null_ordering': ('sqlglot/dialects/duckdb.py', '    NULL_ORDERING = "nulls_are_last"', '    NULL_ORDERING = "nulls_are_small"'),
+    'attr_postgres_index_offset': ('sqlglot/dialects/postgres.py', '    INDEX_OFFSET = 1\n', '    INDEX_OFFSET = 0\n'),
+    'attr_bigquery_log_base': ('sqlglot/dialects/bigquery.py', '    LOG_BASE_FIRST = False', '    LOG_BASE_FIRST = True'),
+    'attr_hive_date_format': ('sqlglot/dialects/hive.py', '    DATE_FORMAT = "\'yyyy-MM-dd\'"', '    DATE_FORMAT = "\'yyyy-MM\'"'),
+    'attr_mysql_tokenizer_quotes': ('sqlglot/dialects/mysql.py', '        QUOTES = ["\'", \'"\']', '        QUOTES = ["\'"]'),
+    'attr_hive_tokenizer_escapes': ('sqlglot/dialects/hive.py', '        STRING_ESCAPES = ["\\\\"]', '        STRING_ESCAPES = ["\\\\", "\'"]'),
+    'attr_postgres_parser_json': ('sqlglot/parsers/postgres.py', '    JSON_ARROWS_REQUIRE_JSON_TYPE = True', '    JSON_ARROWS_REQUIRE_JSON_TYPE = False'),
+    'attr_hive_parser_log': ('sqlglot/parsers/hive.py', '    LOG_DEFAULTS_TO_LN = True', '    LOG_DEFAULTS_TO_LN = False'),
+    'attr_bigquery_parser_functions': ('sqlglot/parsers/bigquery.py', '"BIT_AND": exp.BitwiseAndAgg.from_arg_list,', '"BIT_AND": exp.BitwiseOrAgg.from_arg_list,'),
+    'attr_duckdb_transforms': ('sqlglot/generators/duckdb.py', 'exp.ArraySum: rename_func("LIST_SUM"),', 'exp.ArraySum: rename_func("LIST_TOTAL"),'),
+    'attr_hive_generator_decode': ('sqlglot/generators/hive.py', '    SUPPORTS_DECODE_CASE = False', '    SUPPORTS_DECODE_CASE = True'),
+    'attr_lateral_arg_types': ('sqlglot/expressions/query.py', 'class Lateral(Expression, UDTF):\n    arg_types = {\n        "this": True,\n        "view": False,',
+                               'class Lateral(Expression, UDTF):\n    arg_types = {\n        "this": True,\n        "view": True,'),
+    'attr_approx_quantiles_arg_types': ('sqlglot/expressions/aggregate.py', 'class ApproxQuantiles(Expression, AggFunc):\n    arg_types = {"this": True, "expression": False}',
+                                        'class ApproxQuantiles(Expression, AggFunc):\n    arg_types = {"this": True, "expression": True}'),
+    'base_parser_flag': ('sqlglot/parser.py', '    SUPPORTS_DIRECTED_JOIN = True', '    SUPPORTS_DIRECTED_JOIN = False'),
+    'base_generator_flag': ('sqlglot/generator.py', '    IGNORE_NULLS_IN_FUNC = False', '    IGNORE_NULLS_IN_FUNC = True'),
+}
+REPLACEMENTS.update({case: [edit] for case, edit in ATTRIBUTES.items()})
 # Comment-only edits. The first three cases cover sources that tests read as
 # text (linecache through warnings, read_text of sqlglot/typing). Parser,
 # generator and optimizer files were drawn with random.Random(20261121).

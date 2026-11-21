@@ -294,3 +294,11 @@ The five earlier mutation reports still pass under the new code.
 51 project tests passed. make sample: 346.876 s, zero misses; make check printed format ok. Container stdout was 36347 bytes, byte-identical to the host benchmark and across three restricted runs. Median selector CPU under amd64 emulation was 0.903 s, against 0.756 s for 14d06ec. Peak RSS was 57724 KiB. The remaining four fallbacks are class-level constants or import-time call arguments.
 
 Residual risk: linecache caches source across tests. A test that reads a cached file without opening it is not recorded as a reader. No current test reads sqlglot source through inspect, and sqlglot does not read it itself.
+
+## Phase 8: class attribute evidence - 2026-11-22 (validation incomplete)
+
+The tracer now injects a cooperative tracing metaclass through builtins.__build_class__ and installs __getattribute__ on root sqlglot classes. It records receivers, class-body attribute reads by their defining class, runtime class writes, import-time reads with the class under construction, and tests that change sqlglot module globals or class-level containers. owner() clears linecache. hybrid.decide narrows structural edits that are only class-level assignment values in non-core files, as described in AGENTS.md.
+
+Evidence was rebuilt with tools/collect.sh: forward 399 s, reverse 393 s, 796 s in total. It matches the pin and the organizer IDs. The index is 1196139 bytes and the tracked repository is about 2.8 MB. Unit tests pass. benchmark.py gives 270.947 s with zero misses and one fallback (import_module_read).
+
+Mutations: 12 of the 28 runs finished before the run was stopped, with no miss. These were the attr_* cases except attr_approx_quantiles_arg_types. Ten of the 12 had failing tests, and every narrowed case kept all its failures: 22/1216, 2/465, 2/419, 1/510, 3/369, 2/5, 2/541 for the generator cache case, and 1/347 selected. attr_mysql_tokenizer_quotes and attr_lateral_arg_types fell back to the full suite. Not yet run: attr_approx_quantiles_arg_types, base_parser_flag, base_generator_flag and the 13 earlier cases. make sample, make check and container CPU are also not yet measured. This commit is not a validated submission candidate.

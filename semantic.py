@@ -68,6 +68,60 @@ def _split(tree):
     return bodies, ast.dump(tree), duplicate, parents
 
 
+def _assigned_name(node):
+    """Target of a single-name class-level assignment with a value, else None."""
+    if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+        return node.targets[0].id
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+        return node.target.id
+    return None
+
+
+def _bindings(body, name):
+    count = 0
+    for node in (n for statement in body for n in ast.walk(statement)):
+        if isinstance(node, ast.Name) and node.id == name and not isinstance(node.ctx, ast.Load):
+            count += 1
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
+            count += 1
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            count += sum((alias.asname or alias.name).split('.')[0] == name for alias in node.names)
+    return count
+
+
+def _body_reads(body, name):
+    """Over-approximate class-scope reads of name: function and lambda bodies are placeholders."""
+    return any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
+               for statement in body for n in ast.walk(statement))
+
+
+def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
+    if len(old_body) != len(new_body):
+        return None
+    changes = []
+    for a, b in zip(old_body, new_body):
+        if ast.dump(a) == ast.dump(b):
+            continue
+        if isinstance(a, ast.ClassDef) and isinstance(b, ast.ClassDef) and a.name == b.name and all(
+                ast.dump(ast.Tuple(elts=getattr(a, f) or [], ctx=ast.Load()))
+                == ast.dump(ast.Tuple(elts=getattr(b, f) or [], ctx=ast.Load()))
+                for f in ('bases', 'keywords', 'decorator_list', 'type_params')):
+            inner = _class_attribute_changes(a.body, b.body, prefix + a.name + '.', True)
+            if inner is None:
+                return None
+            changes.extend(inner)
+            continue
+        name = _assigned_name(a) if in_class else None
+        if (not name or name.startswith('__') or name != _assigned_name(b)
+                or (isinstance(a, ast.AnnAssign) != isinstance(b, ast.AnnAssign))
+                or (isinstance(a, ast.AnnAssign) and (ast.dump(a.annotation), a.simple) != (ast.dump(b.annotation), b.simple))
+                or _bindings(old_body, name) != 1 or _bindings(new_body, name) != 1):
+            return None
+        changes.append(dict(cls=prefix[:-1], attr=name,
+                            body_read=_body_reads(old_body, name) or _body_reads(new_body, name)))
+    return changes
+
+
 def scope_names(source: str) -> set[str]:
     """Qualified names of the code objects split out of source."""
     return set(_split(ast.parse(source))[0])
@@ -98,11 +152,28 @@ def classify_change(old: str, new: str) -> dict:
         name for name in changed
         if (name in previous and name in current) or parents.get(name) not in changed)
     duplicates = old_duplicate | new_duplicate
-    if duplicates and (not result['functions'] or any(
-            name == dup or name.startswith(dup + '.')
-            for name in result['functions'] for dup in duplicates)):
+
+    def ambiguous(name):
+        return any(name == dup or name.startswith(dup + '.') for dup in duplicates)
+
+    structural = old_structure != new_structure
+    # Structural edits explained entirely by class-level assignment values, with
+    # unchanged names, bases, keywords, decorators and statements elsewhere.
+    attributes = _class_attribute_changes(before.body, after.body) if structural else None
+    if attributes and any(ambiguous(change['cls']) for change in attributes):
+        attributes = None
+    if any(ambiguous(name) for name in result['functions']) or (
+            duplicates and not result['functions'] and not attributes):
         result['reason'] = 'duplicate_scope'
         return result
+    result['structural'] = structural
+    result['reason'] = 'structural' if structural else 'bodies_or_text'
+    result['class_attributes'] = attributes or None
+    return result
     result['structural'] = old_structure != new_structure
     result['reason'] = 'structural' if result['structural'] else 'bodies_or_text'
+    # Structural edits explained entirely by class-level assignment values, with
+    # unchanged names, bases, keywords, decorators and statements elsewhere.
+    result['class_attributes'] = (_class_attribute_changes(before.body, after.body) or None
+                                  if result['structural'] else None)
     return result

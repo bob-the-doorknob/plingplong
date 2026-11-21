@@ -105,7 +105,8 @@ class CommentOnly(unittest.TestCase):
         self.assertEqual(self.decide_a('# note\n' + self.OLD_A, self.data(**{self.A: [-1]})), (None, 'shared_or_missing'))
 
     def test_encoding_cookie_falls_back(self):
-        for new in ['# -*- coding: latin-1 -*-\n' + self.OLD_A, '#!/usr/bin/env python\n# vim: set fileencoding=utf-8\n' + self.OLD_A]:
+        for new in ['# -*- coding: latin-1 -*-\n' + self.OLD_A, '#!/usr/bin/env python\n# vim: set fileencoding=utf-8\n' + self.OLD_A,
+                    '# a\x0cb\n# coding: latin-1\n' + self.OLD_A, '# a\x85b\n# coding: latin-1\n' + self.OLD_A]:
             with self.subTest(new=new[:30]):
                 self.assertEqual(self.decide_a(new), (None, 'encoding_cookie'))
         data = self.data()
