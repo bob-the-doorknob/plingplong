@@ -45,11 +45,11 @@ line_hits = {}
 current_lines = set()
 
 
-def line_event(code, line):
+def line_event(code, line, disable=getattr(getattr(sys, 'monitoring', None), 'DISABLE', None)):
     path = code.co_filename
     if path.startswith('/src/sqlglot/'):
         current_lines.add((path[5:], line))
-    return sys.monitoring.DISABLE
+    return disable
 
 
 def flush_lines():
@@ -310,6 +310,9 @@ def start():
             sys.monitoring.restart_events()
     bootstrap._load_unlocked = shared_import
     if LINE_ONLY:
+        os.makedirs('/tmp/line-started', exist_ok=True)
+        with open(f'/tmp/line-started/{os.getpid()}.json', 'w') as f:
+            json.dump(dict(owner=context, order=os.environ.get('BR_REVERSE', '0')), f)
         m = sys.monitoring
         m.use_tool_id(3, 'blast-radius-lines')
         m.register_callback(3, m.events.LINE, line_event)

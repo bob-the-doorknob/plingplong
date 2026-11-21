@@ -30,7 +30,13 @@ for order in ('0', '1'):
 
 observed = defaultdict(lambda: defaultdict(set))
 child_files = set()
-for shard in Path('/tmp/lines').glob('*.json'):
+shards = {p.name: p for p in Path('/tmp/lines').glob('*.json')}
+startup = {p.name: json.loads(p.read_text()) for p in Path('/tmp/line-started').glob('*.json')}
+assert shards.keys() == startup.keys()
+for order in ('0', '1'):
+    child_owners = {v['owner'] for v in startup.values() if v['order'] == order}
+    assert set(baseline['child_files']) <= child_owners, (order, child_owners)
+for shard in shards.values():
     shard_owners = set()
     for path, lines in json.loads(shard.read_text()).items():
         assert path in baseline['sources'], path

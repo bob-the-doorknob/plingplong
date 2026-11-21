@@ -421,3 +421,8 @@ was 11968 bytes. The 31 completed Phase 9 mutations kept all 155 failures.
 New comparison and guard mutations kept 52 failing IDs. The additional
 optimizer boolean mutation completed without failures. Rebuild the line index
 with the same trace image as README.md and /repo/tools/collect_lines.sh.
+
+P10-B index verification was repeated with startup and exit manifests for
+every traced Python process. Both suite orders produced the exact previously
+committed line index blob 9c019d24bd9db238944145c23ee28adcd4d8005b. This
+checks collected child-process completion in addition to test outcomes.
