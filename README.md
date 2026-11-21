@@ -81,3 +81,14 @@ impact.py is experimental and is not called by the submission. It exposes
 build_index(checkout_path) and select_tests(diff_text, tests, index). No pinned
 SQLGlot checkout could be fetched, so no claim of SQLGlot narrowing or improvement
 is made. Scheduler and Docker payload remain unchanged. See architecture notes.
+
+Latest verification: exact `make sample` passed under Ubuntu WSL on 2026-11-21,
+1104.510 simulated seconds, zero misses. GNU Make is available as a user-local
+unpacked Ubuntu package at `/home/andrew/usr/bin/make`; from PowerShell:
+
+```powershell
+wsl -d Ubuntu -- /home/andrew/usr/bin/make -C /mnt/c/Users/Andrew/OneDrive/Documents/NTU_code/Buildathon sample
+```
+
+The earlier Make-unavailable note describes the prior session. Public visibility
+and an accepted leaderboard result remain manual submission gates.

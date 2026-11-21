@@ -5,3 +5,6 @@ __pycache__/
 output.jsonl
 benchmark.json
 *.tar.gz
+.env
+.env.*
+!.env.example

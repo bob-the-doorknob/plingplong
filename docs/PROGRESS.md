@@ -179,3 +179,39 @@ submission flow could be reached. No leaderboard submission or score is claimed.
 User can make the repository public in GitHub Settings, then enter the repository
 URL and verified commit on the RWX track page. First submission remains priority
 ahead of coverage development. No hybrid work was started this session.
+
+## Phase 4: exact Make target verified - 2026-11-21
+
+Fresh session runs as Andrew. Git status clean before checkpoint; origin/main
+matches 4dde8aeee4281325428ebcc126c174e22ee76b27. GitHub remote is NOT empty:
+the foundation and push-status documentation commits are present. Docker Engine
+29.8.0 works; Ubuntu and docker-desktop WSL distributions are available.
+Unauthenticated GitHub API still returns 404 for this known-private repository.
+No ACL/ownership/security changes made; safe.directory already configured.
+
+30 existing unittest tests passed. Host benchmark: 1104.510 s, zero misses,
+0.015625 host CPU seconds. All-tests selector remains unchanged.
+
+GNU Make was absent; sudo is unavailable. Downloaded Ubuntu make 4.4.1-3 package
+with apt-get download and unpacked it in WSL user space (no administrator or
+system package changes). Usable executable: /home/andrew/usr/bin/make.
+Exact successful verification command from Windows PowerShell:
+
+    wsl -d Ubuntu -- /home/andrew/usr/bin/make -C /mnt/c/Users/Andrew/OneDrive/Documents/NTU_code/Buildathon sample
+
+Target built linux/amd64 image and executed the full official Docker restriction
+flags, then score.py: 1104.510 simulated seconds, zero misses. This supersedes the
+historical 'Make unavailable / equivalent commands only' limitation. Container
+CPU not measured. Output remains 30 valid JSON lines / 210840 bytes.
+
+Added .env ignore patterns; no production code changes. Runtime image includes
+only selector.py beyond the pinned base. Experimental modules remain disabled.
+Repository is small (tracked bytes checked below 20 MB); generated stdout,
+archives and Python caches remain ignored. No tracked env/private-key filenames.
+
+Remaining manual actions: GitHub Settings > General > Danger Zone > Change
+repository visibility > Public, then sign in to the official RWX track, submit
+https://github.com/bob-the-doorknob/Buildathon with the final checkpoint SHA and
+wait for an accepted practice result. Visibility and submission not performed.
+No coverage work until a first valid submission is confirmed. Browser access was
+unavailable in preceding checkpoint; no authenticated leaderboard session here.
