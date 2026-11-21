@@ -115,7 +115,9 @@ def decide(diff, data, mode='scope'):
                 return None, 'unobserved_fixture'
         elif path.startswith('sqlglot/') and path.endswith('.py'):
             original = data['sources'][path]
-            if any(ENCODING_COOKIE.search(line) for text in (original, new) for line in text.splitlines()[:2]):
+            # Python ends lines only at \r\n, \r or \n; str.splitlines also splits at \x0c, \x85, ...
+            if any(ENCODING_COOKIE.search(line) for text in (original, new)
+                   for line in re.split(r'\r\n|\r|\n', text, maxsplit=2)[:2]):
                 return None, 'encoding_cookie'
             try:
                 compile(new, path, 'exec', dont_inherit=True)
