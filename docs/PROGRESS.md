@@ -302,3 +302,90 @@ The tracer now injects a cooperative tracing metaclass through builtins.__build_
 Evidence was rebuilt with tools/collect.sh: forward 399 s, reverse 393 s, 796 s in total. It matches the pin and the organizer IDs. The index is 1196139 bytes and the tracked repository is about 2.8 MB. Unit tests pass. benchmark.py gives 270.947 s with zero misses and one fallback (import_module_read).
 
 Mutations: 12 of the 28 runs finished before the run was stopped, with no miss. These were the attr_* cases except attr_approx_quantiles_arg_types. Ten of the 12 had failing tests, and every narrowed case kept all its failures: 22/1216, 2/465, 2/419, 1/510, 3/369, 2/5, 2/541 for the generator cache case, and 1/347 selected. attr_mysql_tokenizer_quotes and attr_lateral_arg_types fell back to the full suite. Not yet run: attr_approx_quantiles_arg_types, base_parser_flag, base_generator_flag and the 13 earlier cases. make sample, make check and container CPU are also not yet measured. This commit is not a validated submission candidate.
+
+## Phase 8 verification and Phase 9 import proof
+
+Started from main 41fcbedfeda2ccc700b97d992a36431d0102b545 in an isolated
+phase9-import-proof worktree. Phase 8's AST classifier raised AttributeError
+on Python 3.11, which lacks ClassDef.type_params. Defaulting the absent field
+to an empty list reproduces the Linux/Python 3.13 behavior. A literal class
+assignment that changes literal type or starts evaluating an expression now
+falls back. Replacing the pinned Hive tokenizer escape list with None raised
+during class creation and produced 34 pytest collection errors. Phase 8
+selected 510 tests on that patch. Phase 9 selects all 1620.
+
+| Public sample variant | Simulated seconds | Container CPU median (s) | Misses | Fallbacks | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Phase 7 | 346.876 | 0.831 | 0 | 4 | 267.77 |
+| Phase 8 | 270.947 | 0.689 | 0 | 1 | 134.77 |
+| Phase 9 | 236.606 | 0.699 | 0 | 0 | 80.97 |
+
+All 69 project tests passed on host Python 3.11 and container Python 3.13.18.
+Exact make sample and make check passed for Phase 8 and Phase 9 in WSL.
+Three restricted runs per variant produced identical bytes within each variant.
+Phase 8 emitted 19232 bytes, with peak RSS 54388 KiB. Phase 9 emitted 12260 bytes,
+with peak RSS 54332 KiB and selector wall time up to 0.794 s. These are local
+linux/amd64 measurements. Source-derived evidence retains the Phase 8 blob
+d0336a88899cf77f6455f9f036b6995b7a5a1275 from the pinned SQLGlot revision.
+
+The remaining Phase 8 fallback was an observed read of TriggerProperties.key
+when constructing expressions.EXPR_CLASSES. The changed value influences
+required_args, while key comes separately from the class name. The Phase 9
+dependency proof avoids only the unaffected module edge under the conditions
+stated in ARCHITECTURE.md. Independent review checked 163 matching source
+definitions and identified that the packed ancestry filters external classes.
+The implementation now also requires an explicit sole Expression base in the
+AST, and tests cover subclasses and downstream import consumers.
+
+Three public patches each cost 27.454 s. They select test_execute_tpcds
+(21.454 s) through execution of Dialect.case_sensitive,
+_should_eliminate_join or serde.dump. Static test importers add 112 tests to
+the dialect patch. A separate one-test probe confirmed TPC-DS actually enters
+all four expensive affected functions, including Context.table. All 30
+LPT schedules meet the lower bound from the longest test and mean worker load.
+The remaining opportunities are selection precision, including attribution to
+individual executor tests, and safe net savings from runtime verification.
+
+### Mutation matrix
+
+All 28 original cases completed, plus three independent registry mutations.
+The 31 completed cases produced 155 failing test IDs across case
+runs, all retained by both Phase 8 and Phase 9. An additional Hive type mutation produced 34
+collection errors in pytest and is inconclusive for numbered labels. Phase 9
+selected the full suite for that patch. Eight cases were retried after fixing
+a harness syntax error. Reproduce any case with the commands in README.md.
+
+| Case | Kind | Pytest exit | Failing IDs | Selected | CI seconds | Selection reason | Omitted IDs |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
+| attr_approx_quantiles_arg_types | Class attribute | 1 | 4 | 1620 | 36.817 | import_module_read | None |
+| attr_bigquery_log_base | Class attribute | 1 | 2 | 419 | 16.038 | observed | None |
+| attr_bigquery_parser_functions | Class attribute | 1 | 1 | 347 | 14.067 | observed | None |
+| attr_duckdb_null_ordering | Class attribute | 1 | 22 | 1216 | 27.454 | observed | None |
+| attr_duckdb_transforms | Class attribute | 1 | 2 | 541 | 27.454 | observed | None |
+| attr_hive_date_format | Class attribute | 0 | 0 | 510 | 16.300 | observed | None |
+| attr_hive_generator_decode | Class attribute | 0 | 0 | 311 | 12.686 | observed | None |
+| attr_hive_invalid_escapes | Class attribute | 2 | Inconclusive | 1620 | 36.817 | structural_or_text | Unlabeled |
+| attr_hive_parser_log | Class attribute | 1 | 2 | 5 | 2.494 | observed | None |
+| attr_hive_tokenizer_escapes | Class attribute | 1 | 1 | 510 | 16.300 | observed | None |
+| attr_lateral_arg_types | Class attribute | 1 | 5 | 1620 | 36.817 | import_module_read | None |
+| attr_mysql_tokenizer_quotes | Class attribute | 1 | 6 | 1620 | 36.817 | import_module_read | None |
+| attr_postgres_index_offset | Class attribute | 1 | 2 | 465 | 16.387 | observed | None |
+| attr_postgres_parser_json | Class attribute | 1 | 3 | 369 | 14.493 | observed | None |
+| base_generator_flag | Core class attribute | 1 | 10 | 1620 | 36.817 | structural_or_text | None |
+| base_parser_flag | Core class attribute | 1 | 1 | 1620 | 36.817 | structural_or_text | None |
+| block_fixture | Fixture | 1 | 1 | 4 | 3.804 | observed | None |
+| comment_core | Source text | 0 | 0 | 3 | 2.398 | comment_only | None |
+| comment_dialect | Source text | 0 | 0 | 3 | 2.398 | comment_only | None |
+| comment_dune_generator | Source text | 0 | 0 | 3 | 2.398 | comment_only | None |
+| comment_isolate_table_selects | Source text | 0 | 0 | 3 | 2.398 | comment_only | None |
+| comment_mixed | Text and function | 1 | 37 | 184 | 27.454 | observed | None |
+| comment_tokens | Source text | 0 | 0 | 3 | 2.398 | comment_only | None |
+| comment_trino_parser | Source text | 0 | 0 | 3 | 2.398 | comment_only | None |
+| comment_typing | Source text | 0 | 0 | 4 | 2.409 | comment_only | None |
+| fixture | Fixture | 1 | 1 | 4 | 2.503 | observed | None |
+| function | Function body | 1 | 37 | 184 | 27.454 | observed | None |
+| lambda | Function body | 1 | 2 | 11 | 2.732 | observed | None |
+| nested | Function body | 1 | 2 | 121 | 6.146 | observed | None |
+| registry_clone | Registry state | 0 | 0 | 7 | 2.946 | observed | None |
+| registry_in_place | Registry state | 1 | 7 | 1620 | 36.817 | structural_or_text | None |
+| registry_trigger_event | Registry state | 1 | 7 | 10 | 2.480 | observed | None |

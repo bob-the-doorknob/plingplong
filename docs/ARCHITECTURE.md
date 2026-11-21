@@ -15,3 +15,24 @@ hybrid.py validates same-path Git text hunks against the original stored bytes d
 selector.py emits one compact JSON line per patch and writes diagnostics to stderr. LPT sorts descending rounded milliseconds, tries one through eight workers and selects the least costly schedule. The full-suite assignment is cached. No incoming code executes. The submission contains neither public failure labels nor a patch lookup table.
 
 Finite traces can miss reflective code inspection, cached initialization, native operations, indirect file reads, directory enumeration or cross-process behavior. The two independent full-suite mutations exercise function and fixture selection. They do not establish hidden-case recall.
+
+## Class attributes and import-time state
+
+Phase 8 records defining and receiving classes, import consumers, runtime writes,
+and a cache-writer flag. The selector closes over downstream holders and
+subclasses. Phase 9 keeps each import edge's source attribute. In the pinned
+SQLGlot source, Expr.__init_subclass__ derives key from the class name and
+required_args separately from arg_types. EXPR_CLASSES registers the same class
+under that key. An isolated boolean toggle in the literal arg_types mapping of
+a plain, direct, observed leaf Expression class can therefore ignore the module
+read of its unchanged key. The selector still follows import consumers of
+arg_types, required_args and other attributes. Changed dictionary keys, dynamic
+computation, mixed edits, subclasses and unresolved dependencies retain the
+ordinary fallback rules.
+
+The cache snapshot detects reassignment and container size changes. It can miss
+same-size replacements and nested mutations. The rule above makes no claim
+about the equivalence of mutable containers. General import instrumentation
+would need source-attributed readers for the changed state, including lazy
+imports and cached aliases. The existing offline traces also retain uncertainty
+around source read caches and child processes.

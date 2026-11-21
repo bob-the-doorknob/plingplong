@@ -95,6 +95,33 @@ def _body_reads(body, name):
                for statement in body for n in ast.walk(statement))
 
 
+def _literal_kind(node):
+    try:
+        return type(ast.literal_eval(node))
+    except (ValueError, TypeError):
+        return None
+
+
+def _boolean_schema_edit(before, after):
+    """Recognize a plain class whose only change is a required-argument flag."""
+    if any(node.decorator_list or node.keywords or len(node.body) != 1 for node in (before, after)):
+        return False
+    if len(before.bases) != 1 or not isinstance(before.bases[0], ast.Name) or before.bases[0].id != 'Expression':
+        return False
+    first, second = before.body[0], after.body[0]
+    if any(_assigned_name(node) != 'arg_types' or not isinstance(node.value, ast.Dict)
+           for node in (first, second)):
+        return False
+    for node in (first, second):
+        if not all(isinstance(key, ast.Constant) and type(key.value) is str
+                   for key in node.value.keys):
+            return False
+        if not all(isinstance(value, ast.Constant) and type(value.value) is bool
+                   for value in node.value.values):
+            return False
+    return [key.value for key in first.value.keys] == [key.value for key in second.value.keys]
+
+
 def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
     if len(old_body) != len(new_body):
         return None
@@ -103,12 +130,14 @@ def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
         if ast.dump(a) == ast.dump(b):
             continue
         if isinstance(a, ast.ClassDef) and isinstance(b, ast.ClassDef) and a.name == b.name and all(
-                ast.dump(ast.Tuple(elts=getattr(a, f) or [], ctx=ast.Load()))
-                == ast.dump(ast.Tuple(elts=getattr(b, f) or [], ctx=ast.Load()))
+                ast.dump(ast.Tuple(elts=getattr(a, f, []), ctx=ast.Load()))
+                == ast.dump(ast.Tuple(elts=getattr(b, f, []), ctx=ast.Load()))
                 for f in ('bases', 'keywords', 'decorator_list', 'type_params')):
             inner = _class_attribute_changes(a.body, b.body, prefix + a.name + '.', True)
             if inner is None:
                 return None
+            if len(inner) == 1 and _boolean_schema_edit(a, b):
+                inner[0]['boolean_schema'] = True
             changes.extend(inner)
             continue
         name = _assigned_name(a) if in_class else None
@@ -116,6 +145,9 @@ def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
                 or (isinstance(a, ast.AnnAssign) != isinstance(b, ast.AnnAssign))
                 or (isinstance(a, ast.AnnAssign) and (ast.dump(a.annotation), a.simple) != (ast.dump(b.annotation), b.simple))
                 or _bindings(old_body, name) != 1 or _bindings(new_body, name) != 1):
+            return None
+        kind = _literal_kind(a.value)
+        if kind is not None and _literal_kind(b.value) is not kind:
             return None
         changes.append(dict(cls=prefix[:-1], attr=name,
                             body_read=_body_reads(old_body, name) or _body_reads(new_body, name)))
@@ -169,11 +201,4 @@ def classify_change(old: str, new: str) -> dict:
     result['structural'] = structural
     result['reason'] = 'structural' if structural else 'bodies_or_text'
     result['class_attributes'] = attributes or None
-    return result
-    result['structural'] = old_structure != new_structure
-    result['reason'] = 'structural' if result['structural'] else 'bodies_or_text'
-    # Structural edits explained entirely by class-level assignment values, with
-    # unchanged names, bases, keywords, decorators and statements elsewhere.
-    result['class_attributes'] = (_class_attribute_changes(before.body, after.body) or None
-                                  if result['structural'] else None)
     return result
