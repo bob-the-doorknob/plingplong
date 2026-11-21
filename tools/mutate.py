@@ -84,6 +84,11 @@ REPLACEMENTS.update({
     'numeric_snowflake_hex': [('sqlglot/dialects/snowflake.py', '"x": (16, 2, 2, 0xFF)', '"x": (8, 2, 2, 0xFF)')],
     'numeric_clickhouse_hex': [('sqlglot/dialects/clickhouse.py', '"x": (16, 2, 2, 0xFF)', '"x": (8, 2, 2, 0xFF)')],
 })
+REPLACEMENTS.update({
+    'week_oracle_offset': [('sqlglot/dialects/oracle.py', '    WEEK_OFFSET = -1', '    WEEK_OFFSET = 2')],
+    'week_bigquery_offset': [('sqlglot/dialects/bigquery.py', '    WEEK_OFFSET = -1', '    WEEK_OFFSET = 3')],
+    'week_teradata_zero': [('sqlglot/dialects/teradata.py', '    WEEK_OFFSET = -1', '    WEEK_OFFSET = 0')],
+})
 REPLACEMENTS['comment_mixed'] = REPLACEMENTS['function']
 
 

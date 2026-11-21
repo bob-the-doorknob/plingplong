@@ -11,7 +11,8 @@ from pathlib import Path
 from impact import changed_files
 from semantic import classify_change, statement_spans
 from predicate import comparison_swap
-from numeric import ATTRIBUTE, DECODER, decoder_sites, numeric_radix_edit
+from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
+                     week_offset_edit, week_offset_sites)
 
 PIN = 'eb11aec4be8cb2122afe713a4816662c3f0fb2fa'
 
@@ -209,6 +210,23 @@ def class_attribute_tests(data, path, changes, isolated=False):
     return chosen, 'observed'
 
 
+def configuration_members(evidence, cls, base, attr, allow_dialect_import=False):
+    children, _ = class_index(evidence)
+    if cls not in family(base, children):
+        return None
+    members = family(cls, children)
+    for member in members:
+        assigned, generic = member + '@' + attr, member + '@__dict__'
+        if assigned in evidence['W'] or generic in evidence['W']:
+            return None
+        if any(not allow_dialect_import or not owner.startswith('sqlglot/dialects/')
+               for owner in evidence['I'].get(assigned, ())):
+            return None
+        if any(owner not in members for owner in evidence['I'].get(generic, ())):
+            return None
+    return members
+
+
 def numeric_escape_tests(data, path, old, new, change):
     """Select numeric decoder users when a literal map's import-time keys stay fixed."""
     if change['attr'] != ATTRIBUTE or change['body_read'] or not path.startswith('sqlglot/dialects/'):
@@ -218,23 +236,14 @@ def numeric_escape_tests(data, path, old, new, change):
     if not evidence or not lines or DECODER not in lines['files']:
         return None
     cls = path + '::' + change['cls']
-    children, _ = class_index(evidence)
-    if cls not in family('sqlglot/tokens.py::Tokenizer', children):
-        return None
     if not numeric_radix_edit(old, new, change['cls']):
         return None
-    members = family(cls, children)
-    # The pinned dialect initializer uses only key presence. Unknown consumers,
-    # reassignment or reflection during other class construction retain the full
-    # class-based analysis.
-    for member in members:
-        attr, generic = member + '@' + ATTRIBUTE, member + '@__dict__'
-        if attr in evidence['W'] or generic in evidence['W']:
-            return None
-        if any(not owner.startswith('sqlglot/dialects/') for owner in evidence['I'].get(attr, ())):
-            return None
-        if any(owner not in members for owner in evidence['I'].get(generic, ())):
-            return None
+    # The pinned dialect initializer uses only key presence.
+    members = configuration_members(
+        evidence, cls, 'sqlglot/tokens.py::Tokenizer', ATTRIBUTE, allow_dialect_import=True,
+    )
+    if not members:
+        return None
 
     sites = decoder_sites(data['sources'][DECODER])
     if len(sites) != 2:
@@ -248,6 +257,34 @@ def numeric_escape_tests(data, path, old, new, change):
             # A byte decoder may never be entered in the pinned suite. Keep its
             # existing function evidence whenever exact line evidence is absent.
             readers.update(data['hits'].get(DECODER + '::' + scope, ()))
+    if not readers or -1 in readers:
+        return None
+    for member in members:
+        readers.update(tests_of(evidence['A'].get(member + '@__dict__')))
+    return readers | set(lines['extra'])
+
+
+def week_offset_tests(data, path, old, new, change):
+    """Trace local arithmetic and generation that consumes a pinned scalar offset."""
+    if change['attr'] != WEEK_OFFSET or change['body_read'] or not path.startswith('sqlglot/dialects/'):
+        return None
+    evidence = data.get('classes')
+    lines = data.get('line_evidence')
+    if not evidence or not lines or not week_offset_edit(old, new, change['cls']):
+        return None
+    cls = path + '::' + change['cls']
+    members = configuration_members(evidence, cls, 'sqlglot/dialects/dialect.py::Dialect', WEEK_OFFSET)
+    if not members:
+        return None
+    sites = week_offset_sites(data['sources'])
+    if len(sites) != 5:
+        return None
+    readers = set()
+    for filename, line in sites:
+        group = lines['files'].get(filename, {}).get(str(line))
+        if group is None:
+            return None
+        readers.update(lines['groups'][group])
     if not readers or -1 in readers:
         return None
     for member in members:
@@ -306,7 +343,7 @@ def decide(diff, data, mode='scope'):
     code_changed = False
     statement_selected = False
     predicate_selected = False
-    numeric_selected = False
+    configuration_reason = None
     for path, new in updates.items():
         readers = hits.get(path, [])
         chosen.update(readers)
@@ -339,11 +376,15 @@ def decide(diff, data, mode='scope'):
                 isolated = len(updates) == 1 and len(change['class_attributes']) == 1 and not change['functions']
                 found = None
                 if mode == 'scope' and isolated:
-                    found = numeric_escape_tests(data, path, original, new, change['class_attributes'][0])
-                if found is not None:
-                    numeric_selected = True
-                    reason = 'numeric_values'
-                else:
+                    attribute = change['class_attributes'][0]
+                    found = numeric_escape_tests(data, path, original, new, attribute)
+                    if found is not None:
+                        configuration_reason = 'numeric_values'
+                    else:
+                        found = week_offset_tests(data, path, original, new, attribute)
+                        if found is not None:
+                            configuration_reason = 'week_offset'
+                if found is None:
                     found, reason = class_attribute_tests(data, path, change['class_attributes'], isolated)
                 if found is None:
                     return None, reason
@@ -390,6 +431,6 @@ def decide(diff, data, mode='scope'):
             return None, 'unknown'
     if -1 in chosen or (code_changed and not chosen):
         return None, 'shared_or_missing'
-    reason = ('numeric_values' if numeric_selected else 'predicate' if predicate_selected else 'statement' if statement_selected
-              else 'observed' if code_changed else 'comment_only')
+    reason = (configuration_reason or ( 'predicate' if predicate_selected else 'statement' if statement_selected
+              else 'observed' if code_changed else 'comment_only'))
     return {data['ids'][i] for i in chosen}, reason

@@ -58,3 +58,10 @@ class NumericRadixEdit(unittest.TestCase):
         data['classes']['I'][cls + '@NUMERIC_ESCAPES'].pop()
         data['line_evidence']['groups'][0] = [-1]
         self.assertIsNone(numeric_escape_tests(data, path, self.OLD, new, change))
+
+    def test_week_offsets_require_an_in_range_literal_with_stable_truthiness(self):
+        from numeric import week_offset_edit
+        old = 'class Demo:\n    WEEK_OFFSET = -1\n'
+        self.assertTrue(week_offset_edit(old, old.replace('-1', '3'), 'Demo'))
+        for invalid in ('0', '7', '-7', 'True', 'parse(2)', '1 + 2'):
+            self.assertFalse(week_offset_edit(old, old.replace('-1',invalid), 'Demo'))

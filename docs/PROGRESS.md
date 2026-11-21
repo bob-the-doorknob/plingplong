@@ -497,3 +497,21 @@ ClickHouse selected via the new rule, with no observed failing tests. Spark
 and the failing Postgres case retained class-based selection. Review found
 no pinned reflection or persistent cache of decoded results. Cross-test
 state remains an empirical assumption.
+
+P10-F projects isolated nonzero week-offset edits onto all five pinned
+arithmetic and formatting reads. Missing line evidence, class writes,
+generic import-time consumers and zero or out-of-range values preserve
+class-based coverage. Review confirmed no cached derived week value in the
+pinned consumers and identified the old optimizer-wide class attribution
+as the source of most avoidable candidates.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-F | 147.238 | 1.021 | 148.259 | 0 | 29.60 |
+
+P10-E is 5ef6ad182655aeb78a32ab7ce7f4b1d29519c669. F passed 83 unit
+tests and both Make targets. Three restricted runs emitted identical 5038
+bytes, at most 88492 KiB peak RSS and 1.070 s selector wall time. The three
+independent week mutations completed. The BigQuery failure was kept among
+13 tests. The Teradata zero edit used the class fallback and kept its one
+failure. Oracle had no failures.
