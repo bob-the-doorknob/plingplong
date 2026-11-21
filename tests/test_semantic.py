@@ -51,3 +51,13 @@ class SemanticTests(unittest.TestCase):
         old='async def z():\n return 1\ndef a():\n return 1'
         result=classify_change(old,old.replace('return 1','return 2'))
         self.assertEqual(result['functions'], ['a','z'])
+
+    def test_unrelated_overload_does_not_hide_unique_scope(self):
+        old = 'def f(): pass\ndef f(): pass\ndef g(): return 1'
+        result = classify_change(old, old.replace('return 1','return 2'))
+        self.assertFalse(result['structural'])
+        self.assertEqual(result['functions'], ['g'])
+
+    def test_observable_function_metadata(self):
+        for old,new in [('return 1', 'yield 1'), ('"doc"', '"other"')]:
+            self.assertTrue(classify_change('def f(): '+old, 'def f(): '+new)['structural'])

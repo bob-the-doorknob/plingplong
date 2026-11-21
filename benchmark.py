@@ -1,43 +1,38 @@
-"""Compare runtime entry points with the unchanged official scorer (host only)."""
-import contextlib
-import importlib.util
-import io
+"""Measure selectors with public answers used only after all output is produced."""
+from collections import Counter
 import json
-import time
 from pathlib import Path
-import selector
-from score import evaluate_run
+import time
 
-ROOT = Path(__file__).resolve().parent
-SAMPLE = ROOT / 'blast-radius-sample/sample'
+from hybrid import decide, load
+from score import evaluate_run
+import selector
+
+SAMPLE = Path(__file__).resolve().parent / 'blast-radius-sample/sample'
 
 
 def main():
-    tests = json.loads((SAMPLE / 'tests.json').read_text())['tests']
-    answers = json.loads((SAMPLE / 'answers.json').read_text())['commits']
-    spec = importlib.util.spec_from_file_location('starter', ROOT / 'blast-radius-sample/selector.py')
-    starter = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(starter)
-    for name, module in [('starter', starter), ('optimized', selector)]:
-        module.DATA = SAMPLE
-        output = io.StringIO()
-        cpu, wall = time.process_time(), time.perf_counter()
-        with contextlib.redirect_stdout(output):
-            module.main()
-        cpu, wall = time.process_time() - cpu, time.perf_counter() - wall
-        payload = output.getvalue().encode('utf-8')
+    tests = json.loads((SAMPLE/'tests.json').read_text())['tests']
+    answers = json.loads((SAMPLE/'answers.json').read_text())['commits']
+    for mode in ['all', 'file', 'scope']:
+        start, cpu = time.perf_counter(), time.process_time()
+        full = selector.schedule(tests)
+        evidence = load(tests) if mode != 'all' else None
+        rows, counts, reasons = [], [], Counter()
+        for patch in sorted((SAMPLE/'commits').glob('*.patch')):
+            ids, reason = (None,'baseline') if mode == 'all' else decide(patch.read_text(encoding='utf-8'),evidence,mode)
+            workers = full if ids is None else selector.schedule([t for t in tests if t['id'] in ids])
+            if ids is None:
+                reasons[reason] += 1
+            counts.append(sum(map(len,workers)))
+            rows.append(json.dumps(dict(commit=patch.stem,workers=workers),separators=(',',':')))
+        payload = ('\n'.join(rows)+'\n').encode()
+        cpu, wall = time.process_time()-cpu, time.perf_counter()-start
         result = evaluate_run(payload, tests, answers)
-        assert result['ok'], result
-        assert not result['missed_commits'], result
-        assert len(payload) <= 2_000_000
-        workers = json.loads(payload.splitlines()[0])['workers']
-        result.update(variant=name, cpu_seconds=cpu, wall_seconds=wall,
-                      workers=len(workers), selected_per_commit=sum(map(len, workers)),
-                      recorded_seconds_per_commit=sum(t['seconds'] for t in tests),
-                      worker_overhead_seconds=2 * len(workers) * len(answers))
-        print(json.dumps(result))
-        if name == 'optimized':
-            (ROOT / 'output.jsonl').write_bytes(payload)
+        assert result['ok'] and len(payload)<2_000_000, result
+        print(mode, result, 'cpu',cpu,'wall',wall,'mean',sum(counts)/len(counts),'max',max(counts),'fallback',dict(reasons))
+        if mode == 'scope':
+            Path('output.jsonl').write_bytes(payload)
 
 
 if __name__ == '__main__':

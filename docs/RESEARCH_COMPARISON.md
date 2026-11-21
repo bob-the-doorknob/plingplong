@@ -71,3 +71,15 @@ Rejected for this milestone: AST-equality skipping (text remains observable),
 copying competing metadata (rules), and speculative runtime execution (no measured
 net benefit or working container). Coverage, bytecode and name pruning are deferred,
 not empirically rejected. No competitive narrowing score was measured this phase.
+
+## Phase 5 choices
+
+| Technique | Decision and reason |
+| --- | --- |
+| Per-test execution and file reads (CandyOre, h-ardy, shobhit1kapoor) | Collect function entries and fixture/source opens independently. Include file-wide setup, child process uncertainty and shared import work. |
+| Local semantic changes (jklein07, colinbenaissa) | Require validated context and a matching AST skeleton before body-level selection. Existing fixture changes require observed readers. |
+| Bytecode and class state (sophiayuanproj) | Defer. Class attributes, registration and defaults currently trigger full fallback. |
+| Runtime probing (Not-Ethan) | Defer. The current runtime has no database or test-runner dependencies and never executes patches. |
+| Worker optimization | Retain measured LPT. Candidate membership is the dominant cost. |
+
+The offline collector, its evidence and the runtime were implemented from the pinned upstream source. Public competitor scores were excluded from the ablation.

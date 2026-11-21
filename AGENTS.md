@@ -18,5 +18,5 @@
 - Consult current library docs with ctx7 library then ctx7 docs when API-specific
   changes need documentation; never include secrets in queries.
 - Never force-push, change visibility or submit without authorization.
-- impact.py is experimental, fixture-tested only. Do not enable production
-  narrowing without pinned-source, organizer-ID and mutation/sample validation.
+- Production evidence must match the pinned archive and full organizer ID set.
+  Rebuild with the README commands and run tools/check_mutations.py after both mutation runs.

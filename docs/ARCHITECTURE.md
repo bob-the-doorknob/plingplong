@@ -1,70 +1,17 @@
-# Architecture
+# Selection and scheduling
 
-selector.py loads /data/tests.json, validates test identifiers and durations,
-then schedules every numbered test. Patches supply commit identifiers only.
-No sample answer, patch signature, edit category or network is used at runtime.
+The source of truth is SQLGlot revision eb11aec4be8cb2122afe713a4816662c3f0fb2fa and the starter test catalog. The offline collector runs the locked pytest environment in the organizer Python 3.13 image with SKIP_INTEGRATION=0. Numeric test numbers are resolved from the incoming manifest. Any difference in the sorted test identities triggers full-suite scheduling.
 
-schedule(tests) sorts by descending integer milliseconds, then test number.
-For each count from 1 through min(8, selected count), assign the next test to
-the least-loaded worker, breaking load ties by worker index. Drop empty workers.
-Compare maximum load + 2000 ms per occupied worker. First minimum wins, favoring
-fewer workers on equal costs. Empty inventory returns []. Rounding matches the
-official scorer: floor(seconds * 1000 + 0.5).
+## Evidence
 
-Runtime is O(8 * 8 * tests + tests log tests), computed once per batch. No writes
-are required. Diagnostics go to stderr; stdout contains only compact JSON lines.
-Missing or malformed inventory fails before any answers are emitted.
+The collector observes Python code-object entries (qualified names) and file opens under sqlglot and tests/fixtures. It groups setup/teardown and child interpreters by test file. Import initialization enters a shared context, including code called by lazy imports. Shared observations require a full selection for the affected scope or file. Process launches with uncertain attribution retain their parent tests. Function entry covers either side of a branch inside an entered function. Collection uses the original source only.
 
-score.py is the unchanged official scorer. benchmark.py measures both selectors
-on the host; only this development tool reads sample answers. Root Makefile
-runs the official container restrictions against the preserved sample directory.
+Forward and reverse runs contribute observations. The packer checks all catalog identities, the exact pinned tar and actual test outcomes. Every numbered test must pass in organizer order. Tests failing in reverse order are included on every narrowed patch. Static import extraction from impact.py adds test-module importers and tests using those test helpers. Missing or dynamic edges never remove observations. Global incompleteness in the standalone static selector has no pruning authority.
 
-Static dependency analysis is deliberately deferred: pinned source could not be
-fetched and Docker baseline is blocked. Current conservative fallback is all tests
-for every patch, including comments, fixtures, renames and unfamiliar file types.
-LPT optimizes among eight heuristic schedules, not every possible partition.
+## Production
 
-## Phase 2: experimental static index
+hybrid.py validates same-path Git text hunks against the original stored bytes decoded as UTF-8. semantic.py compares AST function bodies and a skeleton retaining class and module statements, function signatures, docstrings and generator status. Body changes select the union of observed entries, file readers, static test importers and uncertain tests. Existing SQL fixture edits select file readers plus uncertain tests. Unobserved scopes, ambiguous definitions, structural edits, textual changes, unknown paths, invalid code and unsupported patch forms select the entire suite. Multi-file changes union candidates, with a full fallback dominating the union.
 
-impact.py is a development-only candidate, excluded from the Docker image.
-`build_index(Path(checkout))` parses sqlglot/ and tests/ Python files without
-executing source. It returns file-to-module names, deterministic reverse import
-edges and a completeness flag. Relative imports and package initialization edges
-are included. `select_tests(diff, tests, index)` returns actual organizer numbers
-for transitively affected test files, or all numbers on uncertainty.
+selector.py emits one compact JSON line per patch and writes diagnostics to stderr. LPT sorts descending rounded milliseconds, tries one through eight workers and selects the least costly schedule. The full-suite assignment is cached. No incoming code executes. The submission contains neither public failure labels nor a patch lookup table.
 
-Ordinary same-path Git text diffs have their hunk counts validated. Renames,
-add/delete files, quoted paths, binary changes, malformed hunks, unknown files,
-comment-only patches, core infrastructure, dialect files, package initialization
-and shared test/config changes retain all tests. Unresolved imports, syntax
-errors and detected dynamic imports/reflection invalidate the entire index.
-An empty candidate set also retains all tests.
-
-This is import reachability, not NameRTS name-level analysis or a safety proof.
-Alias calls, callbacks, resources, monkeypatching and implicit Python behavior
-are not fully modeled. Do not enable it in selector.py until a verified pinned
-checkout, complete organizer test mapping and differential mutation/sample
-validation support it. Current dynamic guard may prevent all SQLGlot narrowing;
-that is an intentional safety outcome, not measured competitive improvement.
-No target index has been generated; no third-party source was copied.
-
-## Phase 3: semantic locality component
-
-semantic.py independently implements classify_change(old, new). It parses both
-texts without importing/executing them. Function/method bodies are compared by
-qualified name, while a separate skeleton retains defaults, annotations,
-decorators, class bases/keywords/attributes, import statements and module code.
-Body-only edits identify candidate scopes. Structural edits, added/removed scopes,
-invalid syntax and duplicate scopes require broad analysis. Nested functions stay
-inside the outer function's body; control-flow definitions stay in module scope.
-
-text_changed is separate from ast_equal. AST equality never means safe to skip:
-source readers, tracebacks, line inspection and fixture processing can observe
-text. The classifier supplies locality evidence only; it does not claim semantic
-program equivalence or decide test exclusion. It remains outside the Docker
-payload with impact.py. Production selector.py and scheduler are unchanged.
-
-Coverage collection and hybrid composition are blocked by unavailable pinned
-source and organizer execution environment. No fabricated completeness flag or
-empty coverage map is used to enable narrowing. See RESEARCH_COMPARISON.md for
-the conceptual design, evidence status and deferred techniques.
+Finite traces can miss reflective code inspection, cached initialization, native operations, indirect file reads, directory enumeration or cross-process behavior. The two independent full-suite mutations exercise function and fixture selection. They do not establish hidden-case recall.
