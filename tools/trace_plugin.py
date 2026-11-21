@@ -8,6 +8,7 @@ def pytest_collection_finish(session):
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_setup(item):
+    trace.boundary(item.nodeid)
     trace.owner(item.nodeid.split('::')[0])
 
 @pytest.hookimpl(tryfirst=True)
@@ -32,6 +33,7 @@ def pytest_runtest_logreport(report):
         passed.add(report.nodeid)
 
 def pytest_sessionfinish(session, exitstatus):
+    trace.boundary(None)
     if exitstatus in (0, 1):
         with open('/tmp/pass'+os.environ.get('BR_REVERSE','0')+'.json','w') as f:
             json.dump(dict(passed=sorted(passed), failed=sorted(failed)), f)
