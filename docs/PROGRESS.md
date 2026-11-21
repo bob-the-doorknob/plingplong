@@ -231,3 +231,66 @@ Pinned SQLGlot with Python 3.13.18 passed 1620 numbered tests and 25440 subtests
 The final 13 fallbacks comprise eight structural or textual Python edits, three unsupported diffs, one shared or missing observation and one fixture text edit. Largest selection was 1620. Worst simulated commit cost was 36.817 seconds. Two complete independently mutated suites yielded 37 failing IDs for the serialization mutation and one for the optimizer fixture mutation. All were selected, among 184 and four candidates respectively.
 
 36 project tests passed. WSL make sample passed under the official isolation flags. Three restricted container repeats produced identical 98319-byte stdout, median selector CPU 0.436 seconds, maximum peak RSS 48396 KiB and wall time below 0.49 seconds per selector. Local simulated time improved by 459.784 seconds (41.63%). This candidate awaits user authorization for a practice leaderboard run. The accepted competition entry remains the previous revision.
+
+## Phase 6: finer scopes and fixture comments - 2026-11-21
+
+Baseline reproduced at 09f90b6 on macOS arm64 (host Python 3.14.7): 36 tests passed, 644.726 s, zero misses.
+
+Changes, both general rules with no sample identifiers:
+
+- semantic.py: nested functions and lambdas are scopes keyed by CPython co_qualname. All 3691 split names in the 215 pinned files were verified to be real code object qualified names. This narrows a nested closure whose factory runs at import time, and a lambda in a class-level table.
+- hybrid.py: an SQL fixture that contains a block comment no longer falls back unless an edited line holds a delimiter. Unterminated block comments are stripped to the end of the file.
+
+| Public sample variant | Simulated seconds | Missed commits | Mean tests | Full fallbacks |
+| --- | ---: | ---: | ---: | ---: |
+| 09f90b6 hybrid | 644.726 | 0 | 746.97 | 13 |
+| Phase 6 hybrid | 542.644 | 0 | 585.47 | 10 |
+
+43 project tests passed. make sample passed with the official flags: 542.644 s, zero misses, and make check printed format ok. SAMPLE and OUTPUT were overridden to a path without spaces, because the Makefile does not quote the volume paths and this checkout path contains spaces and an ampersand. Container stdout was 77392 bytes, byte-identical to the host benchmark and across three restricted runs. Under amd64 emulation on arm64 the median selector CPU was 0.756 s, against 0.594 s for 09f90b6 on the same setup. Peak RSS was 57684 KiB. Emulated CPU is higher than native amd64.
+
+Five full-suite mutations in the trace image (SKIP_INTEGRATION=0). All failures were selected by tools/check_mutations.py:
+
+| Case | Target | Failing IDs | Selected |
+| --- | --- | ---: | ---: |
+| function | serde.py body | 37 | 184 |
+| fixture | eliminate_joins.sql | 1 | 4 |
+| lambda | SQLiteGenerator TRANSFORMS lambda | 2 | 11 |
+| nested | build_regexp_extract.<locals>._builder | 2 | 121 |
+| block_fixture | qualify_columns.sql, which has block comments | 1 | 4 |
+
+The remaining 10 fallbacks are as follows. Three are comment-only patches. Three multi-file patches each include a comment-only Python file. AGENTS.md requires all tests for comment-only changes, so these six were left unchanged. Four are class-level constants or import-time call arguments. Narrowing those needs evidence of attribute reads. Static load-name readers alone are not enough: the dialect metaclass and class bodies read many such attributes at import time, and there are 22 dynamic getattr, dir, vars or __dict__ sites that need an audit.
+
+## Phase 7: AST-based comment-only rule - 2026-11-21
+
+The team relaxed the comment-only rule in AGENTS.md, provided it passed empirical validation. A sqlglot .py file whose ast.dump is unchanged after reconstruction now selects only hits[path] plus hits['!untraced']. It no longer forces a full fallback of a multi-file patch. A shared reader, a failed reconstruction or coding[:=] on line 1 or 2 still selects the full suite.
+
+Evidence for hits[path] on Python files, checked before writing the rule:
+
+- The index has 15 .py reader keys and none contains -1. The readers are tests/dialects/test_dialect.py::TestDialect::test_enum for dialect.py (warning formatting through linecache) and tests/test_typing.py::TestTyping::test_no_redundant_expression_metadata for 14 sqlglot/typing files (read_text, then ast.parse).
+- Imports appear only as 183 sqlglot/**/__pycache__/*.pyc keys, all shared [-1]. compileall runs before collection, and imports run in the shared context.
+- A probe in the trace image confirmed this. Importing sqlglot.dialects.tsql opened only .pyc files. inspect.getsource and warnings.formatwarning opened tsql.py. A second, cached getsource opened nothing.
+- tests/test_docs.py uses load_tests, which pytest ignores, so no doctest IDs are in the catalog. sqlglot itself never reads its own source, frames or line numbers, and no pinned file has an encoding cookie.
+
+Mutations: the targets came from grepping tests/ for inspect|getsource|linecache|__file__|co_firstlineno|traceback, plus parser, generator and optimizer files drawn with random.Random(20261121). Each comment-only case inserts a comment on line 1 and one inside the function body nearest the middle of the file. Eight full-suite runs were made; all failures were selected:
+
+| Case | Files | Failing IDs | Selected |
+| --- | --- | ---: | ---: |
+| comment_dialect | dialects/dialect.py | 0 | 3 |
+| comment_typing | all 15 sqlglot/typing files | 0 | 4 |
+| comment_tokens | tokens.py | 0 | 3 |
+| comment_core | __init__.py, expressions/core.py, parser.py | 0 | 3 |
+| comment_trino_parser | parsers/trino.py | 0 | 3 |
+| comment_dune_generator | generators/dune.py | 0 | 3 |
+| comment_isolate_table_selects | optimizer/isolate_table_selects.py | 0 | 3 |
+| comment_mixed | generator.py comment plus the serde.py function mutation | 37 | 184 |
+
+The five earlier mutation reports still pass under the new code.
+
+| Public sample variant | Simulated seconds | Missed commits | Mean tests | Full fallbacks |
+| --- | ---: | ---: | ---: | ---: |
+| 14d06ec | 542.644 | 0 | 585.47 | 10 |
+| Phase 7 | 346.876 | 0 | 267.77 | 4 |
+
+51 project tests passed. make sample: 346.876 s, zero misses; make check printed format ok. Container stdout was 36347 bytes, byte-identical to the host benchmark and across three restricted runs. Median selector CPU under amd64 emulation was 0.903 s, against 0.756 s for 14d06ec. Peak RSS was 57724 KiB. The remaining four fallbacks are class-level constants or import-time call arguments.
+
+Residual risk: linecache caches source across tests. A test that reads a cached file without opening it is not recorded as a reader. No current test reads sqlglot source through inspect, and sqlglot does not read it itself.

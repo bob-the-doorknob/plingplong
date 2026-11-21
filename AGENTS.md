@@ -5,7 +5,11 @@
 - SQLGlot source must be eb11aec4be8cb2122afe713a4816662c3f0fb2fa.
 - Standard library runtime; deterministic behavior; tests before nontrivial changes.
 - Score integer milliseconds and 2 seconds per occupied worker, max eight workers.
-- Unknown impact and comment-only changes must conservatively select all tests.
+- Unknown impact must conservatively select all tests. A sqlglot .py edit whose
+  ast.dump is unchanged selects only its text readers (hits[path]) plus untraced
+  tests, and never forces a full fallback of a multi-file patch. Shared readers,
+  failed reconstruction or coding[:=] on lines 1-2 still select all tests. SQL
+  fixture comment-only edits still select all tests.
 - Runtime: offline, read-only, nobody, HOME=/tmp, 64 MB tmp, 2 CPUs, 4 GB RAM,
   max 256 processes, 3 minute timeout (4.5 final), stdout <=2 MB.
 - Build: 4 CPUs, 8 GB, 10 minutes; allowed registries/fixed releases/pinned SQLGlot
