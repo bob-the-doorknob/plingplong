@@ -166,3 +166,16 @@ leaderboard submission yet. Production selector and scheduler unchanged.
 Next: commit/push verified foundation, then submit exact hash once public access
 and website authentication are available. Hybrid work stays deferred until this
 first submission milestone is handled.
+
+Git completion: verified foundation committed as
+ af95ca46ae016311506a9f37dfc8fc462bb01496
+and pushed successfully to origin/main. git ls-remote confirmed matching SHA;
+working tree clean after push. Current Git safe.directory entry already present.
+
+Leaderboard blocker: unauthenticated GitHub repository API returns HTTP 404,
+consistent with the known private repository. Public access is required; visibility
+was not changed. Browser automation reports access host unavailable, so no signed-in
+submission flow could be reached. No leaderboard submission or score is claimed.
+User can make the repository public in GitHub Settings, then enter the repository
+URL and verified commit on the RWX track page. First submission remains priority
+ahead of coverage development. No hybrid work was started this session.
