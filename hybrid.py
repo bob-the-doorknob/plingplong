@@ -2,13 +2,14 @@
 import base64
 import difflib
 import gzip
+import hashlib
 import json
 import re
 import zlib
 from pathlib import Path
 
 from impact import changed_files
-from semantic import classify_change
+from semantic import classify_change, statement_spans
 
 PIN = 'eb11aec4be8cb2122afe713a4816662c3f0fb2fa'
 
@@ -208,12 +209,38 @@ def class_attribute_tests(data, path, changes, isolated=False):
 
 def load(tests):
     try:
-        data = json.loads(gzip.decompress(Path(__file__).with_name('evidence.gz').read_bytes()))
+        base = Path(__file__).with_name('evidence.gz').read_bytes()
+        data = json.loads(gzip.decompress(base))
         if data['schema'] == 1 and data['pin'] == PIN and sorted(t['id'] for t in tests) == data['ids']:
+            try:
+                lines = json.loads(gzip.decompress(Path(__file__).with_name('lines.gz').read_bytes()))
+                if (lines['version'] == 1 and lines['pin'] == PIN and lines['ids'] == data['ids']
+                        and lines['base_digest'] == hashlib.sha256(base).hexdigest()):
+                    data['line_evidence'] = lines
+            except (OSError, EOFError, ValueError, KeyError, TypeError, zlib.error):
+                pass
             return data
     except (OSError, EOFError, ValueError, KeyError, TypeError, zlib.error):
         pass
     return None
+
+
+def statement_tests(old, new, path, evidence):
+    files = evidence['files']
+    if path not in files:
+        return None
+    spans = statement_spans(old, new)
+    if not spans:
+        return None
+    lines = files[path]
+    candidates = set(evidence['extra'])
+    for start, end in spans:
+        groups = {lines[str(n)] for n in range(start, end + 1) if str(n) in lines}
+        if not groups:
+            return None
+        for group in groups:
+            candidates.update(evidence['groups'][group])
+    return candidates if -1 not in candidates else None
 
 
 def decide(diff, data, mode='scope'):
@@ -227,6 +254,7 @@ def decide(diff, data, mode='scope'):
     hits = data['hits']
     chosen = set(hits.get('!untraced', []))
     code_changed = False
+    statement_selected = False
     for path, new in updates.items():
         readers = hits.get(path, [])
         chosen.update(readers)
@@ -267,11 +295,18 @@ def decide(diff, data, mode='scope'):
             elif not change['functions']:
                 return None, 'structural_or_text'
             chosen.update(hits.get(path + '::@importers', ()))
+            scopes = set()
             for name in change['functions']:
                 key = path + '::' + name
                 if key not in hits:
                     return None, 'unobserved_scope'
-                chosen.update(hits[key])
+                scopes.update(hits[key])
+            if mode == 'scope' and not change['structural'] and -1 not in scopes and 'line_evidence' in data:
+                statements = statement_tests(original, new, path, data['line_evidence'])
+                if statements is not None:
+                    scopes = statements
+                    statement_selected = True
+            chosen.update(scopes)
             if mode == 'file':
                 for key, ids in hits.items():
                     if key.startswith(path + '::'):
@@ -280,4 +315,5 @@ def decide(diff, data, mode='scope'):
             return None, 'unknown'
     if -1 in chosen or (code_changed and not chosen):
         return None, 'shared_or_missing'
-    return {data['ids'][i] for i in chosen}, 'observed' if code_changed else 'comment_only'
+    reason = 'statement' if statement_selected else 'observed' if code_changed else 'comment_only'
+    return {data['ids'][i] for i in chosen}, reason

@@ -66,6 +66,11 @@ REPLACEMENTS.update({
         'class Clone(Expression):\n    arg_types = {"this": True, "shallow": False, "copy": False}',
         'class Clone(Expression):\n    arg_types = {"this": True, "shallow": True, "copy": False}')],
 })
+REPLACEMENTS.update({
+    'statement_range_condition': [('sqlglot/helper.py', 'if start <= last_end:', 'if start < last_end:')],
+    'statement_executor_guard': [('sqlglot/executor/context.py', 'if self._table is None:', 'if self._table is not None:')],
+    'statement_optimizer_boolean': [('sqlglot/optimizer/eliminate_joins.py', 'if name in left_tables and name not in right_tables:', 'if name in left_tables or name not in right_tables:')],
+})
 REPLACEMENTS['comment_mixed'] = REPLACEMENTS['function']
 
 

@@ -202,3 +202,59 @@ def classify_change(old: str, new: str) -> dict:
     result['reason'] = 'structural' if structural else 'bodies_or_text'
     result['class_attributes'] = attributes or None
     return result
+
+
+def statement_spans(old, new):
+    """Return original executable spans for aligned literal and operator edits."""
+    spans = set()
+    targets = {
+        ast.If: 'test', ast.While: 'test', ast.For: 'iter', ast.AsyncFor: 'iter',
+        ast.Return: 'value', ast.Assign: 'value', ast.AnnAssign: 'value',
+        ast.Expr: 'value', ast.Raise: 'exc',
+    }
+    operators = (ast.operator, ast.unaryop, ast.boolop, ast.cmpop)
+
+    def align(before, after, in_function=False, anchor=None):
+        if isinstance(before, operators) and isinstance(after, operators):
+            if type(before) is type(after):
+                return True
+            if anchor is None:
+                return False
+            spans.add(anchor)
+            return True
+        if type(before) is not type(after):
+            return False
+        if isinstance(before, list):
+            return len(before) == len(after) and all(
+                align(a, b, in_function, anchor) for a, b in zip(before, after)
+            )
+        if not isinstance(before, ast.AST):
+            return before == after
+        if isinstance(before, ast.Constant):
+            if type(before.value) is type(after.value) and before.value == after.value:
+                # Preserve signed zero and other representation changes.
+                if ast.dump(before) == ast.dump(after):
+                    return True
+            if anchor is None or type(before.value) is not type(after.value):
+                return False
+            spans.add(anchor)
+            return True
+        if isinstance(before, (ast.Lambda,) + OPAQUE):
+            return ast.dump(before) == ast.dump(after)
+        if isinstance(before, FUNCTIONS) and (
+                ast.get_docstring(before, clean=False) != ast.get_docstring(after, clean=False)):
+            return False
+        for name, child in ast.iter_fields(before):
+            inside = in_function
+            span = anchor
+            if isinstance(before, FUNCTIONS + (ast.ClassDef,)):
+                inside = isinstance(before, FUNCTIONS) and name == 'body'
+                span = None
+            elif inside and targets.get(type(before)) == name and isinstance(child, ast.expr):
+                # Start at the statement header to cover a condition's short-circuit paths.
+                span = (before.lineno, child.end_lineno)
+            if not align(child, getattr(after, name), inside, span):
+                return False
+        return True
+
+    return spans if align(ast.parse(old), ast.parse(new)) and spans else None

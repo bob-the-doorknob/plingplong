@@ -404,3 +404,20 @@ four select TPC-DS at 21.454 s. The fifth uses 498 tests and has an 8.155 s
 makespan. See benchmark.py --details for per-patch evidence. The plan is to
 collect independent line coverage, score narrow statement edits, then use
 measured costs to decide whether runtime probes merit an experiment.
+
+P10-B adds a separate 281923-byte line index with 53027 observed source lines
+from two organizer-compatible orders. Missing or shared spans retain function
+coverage. Same-shape literal and operator edits use the original condition or
+statement span. Insertions, deletions, lambda edits and definition-time edits
+retain the earlier behavior.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-B | 234.442 | 0.950 | 235.392 | 0 | 78.37 |
+
+The linux/amd64 Make targets and three identical restricted runs passed.
+Peak RSS was 77636 KiB, selector wall time was at most 1.032 s and stdout
+was 11968 bytes. The 31 completed Phase 9 mutations kept all 155 failures.
+New comparison and guard mutations kept 52 failing IDs. The additional
+optimizer boolean mutation completed without failures. Rebuild the line index
+with the same trace image as README.md and /repo/tools/collect_lines.sh.
