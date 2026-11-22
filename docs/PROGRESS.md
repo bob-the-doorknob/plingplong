@@ -515,3 +515,21 @@ bytes, at most 88492 KiB peak RSS and 1.070 s selector wall time. The three
 independent week mutations completed. The BigQuery failure was kept among
 13 tests. The Teradata zero edit used the class fallback and kept its one
 failure. Oracle had no failures.
+
+P10-G matches Boolean regrouping when the ordered leaf expressions are
+unchanged and an original executable statement anchors the edit. Candidates
+come from the full original statement span. Unmapped or shared spans keep
+function coverage. The independent canonicalize guard mutation retained all
+17 failing IDs among 69 selected. Review found no pinned first-divergence
+counterexample.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-G | 138.664 | 0.984 | 139.648 | 0 | 17.47 |
+
+P10-F is 01a7922543f8a420558ea555119b67a31cc64481. P10-G passed 84 unit
+tests, both WSL Make targets and three identical restricted runs. Maximum
+selector wall time was 1.062 s, peak RSS was at most 88532 KiB and stdout
+was 3214 bytes. No public patch selected the full suite. All 46
+completed mutations retained their 233 failing IDs across case runs.
+The Hive collection-error case remains inconclusive.

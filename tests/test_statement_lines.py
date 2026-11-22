@@ -131,3 +131,9 @@ class ComparisonSwap(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'example'):
                 tracer.run_labeled('tests/example.py::test_one', fail, (), {})
         self.assertEqual(history, ['tests/example.py::test_one', 'tests/example.py'])
+
+    def test_reassociated_boolean_tree_uses_the_original_control_span(self):
+        old = 'def f(a, b, c):\n    if a and b and c:\n        return 1\n'
+        new = old.replace('and b and c', 'and b or c')
+        self.assertEqual(statement_spans(old, new), {(2, 2)})
+        self.assertIsNone(statement_spans(old, new.replace('or c', 'or a')))

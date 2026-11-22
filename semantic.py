@@ -204,6 +204,12 @@ def classify_change(old: str, new: str) -> dict:
     return result
 
 
+def _boolean_operands(node):
+    if isinstance(node, ast.BoolOp):
+        return [operand for value in node.values for operand in _boolean_operands(value)]
+    return [ast.dump(node)]
+
+
 def statement_spans(old, new):
     """Return original executable spans for aligned literal and operator edits."""
     spans = set()
@@ -237,6 +243,13 @@ def statement_spans(old, new):
                     return True
             if anchor is None or type(before.value) is not type(after.value):
                 return False
+            spans.add(anchor)
+            return True
+        if (anchor is not None and isinstance(before, ast.BoolOp)
+                and (type(before.op) is not type(after.op) or len(before.values) != len(after.values))
+                and _boolean_operands(before) == _boolean_operands(after)):
+            # Regrouping can change short-circuit order only after the original
+            # enclosing statement is reached.
             spans.add(anchor)
             return True
         if isinstance(before, (ast.Lambda,) + OPAQUE):

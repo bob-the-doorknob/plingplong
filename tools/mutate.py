@@ -89,6 +89,9 @@ REPLACEMENTS.update({
     'week_bigquery_offset': [('sqlglot/dialects/bigquery.py', '    WEEK_OFFSET = -1', '    WEEK_OFFSET = 3')],
     'week_teradata_zero': [('sqlglot/dialects/teradata.py', '    WEEK_OFFSET = -1', '    WEEK_OFFSET = 0')],
 })
+REPLACEMENTS.update({
+    'boolean_guard_canonicalize': [('sqlglot/optimizer/canonicalize.py', 'if isinstance(node, exp.Add) and node.type and node.type.this in exp.DataType.TEXT_TYPES:', 'if isinstance(node, exp.Add) and node.type or node.type.this in exp.DataType.TEXT_TYPES:')],
+})
 REPLACEMENTS['comment_mixed'] = REPLACEMENTS['function']
 
 

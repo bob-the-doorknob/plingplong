@@ -12,7 +12,7 @@ For each SQLGlot patch, the submission reconstructs the modified source and sele
 
 The last two commands require Docker, GNU Make and python3. The Makefile runs the linux/amd64 image offline as nobody with the competition limits. The benchmark compares full-suite, file-level and function-level selection on the same 30 public patches. See docs/PROGRESS.md for measured results and docs/ARCHITECTURE.md for evidence collection and limitations.
 
-On the 30 public samples the hybrid scores **147.238 simulated seconds with zero misses**, down from 1104.510 for the full-suite scheduler.
+On the 30 public samples the hybrid scores **138.664 simulated seconds with zero misses**, down from 1104.510 for the full-suite scheduler.
 
 ## Reproduce the index
 
