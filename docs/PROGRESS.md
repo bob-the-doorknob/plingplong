@@ -828,3 +828,25 @@ from test-method edits are excluded by a static check, not traced. Docstring
 treatment relies on the absence of __doc__ readers in pinned sources and
 collected tests. File add, delete and rename, class addition and
 sqlglot/__init__.py edits still use the full suite.
+
+### P13 survey labels and review fixes
+
+tools/label_patch.py labels an arbitrary same-path patch against the pinned
+archive with the locked image. Thirty organizer-style survey patches (seed 41)
+were labeled. All were chosen from cases Phase 13 narrows and Phase 12 sends to
+the full suite. Strata: 7 member or header, 1 module binding, 6 docstring, 4
+statement and 12 fixture. All 30 labels completed. No commit was missed and all
+41 failing parent IDs were retained. The batch cost 205.260 simulated seconds,
+against 1104.510 for Phase 12.
+
+A code review of the import-safety gates led to three changes. A method
+addition is checked for class-body name reads, like a removal. Known dotted
+names come only from module and class scope. Class-body mutators must match the
+literal container type of the attribute and take only literal arguments. All
+labeled split decisions were unchanged, and 120 unit tests passed.
+
+Final candidate (restricted linux/amd64 Docker under emulation, three identical
+runs each): public 129.530 s with 1.346 s median CPU; holdout 370.546 s with
+1.098 s; P13 set 266.793 s with 1.824 s. The P13 set includes the inconclusive
+BigQuery case, which selects the full suite. make sample and make check passed.
+Labeled misses across public, holdout, dev, validation, P13 and the survey: zero.
