@@ -14,3 +14,8 @@
 !structural.py
 !structural.gz
 !tests.gz
+
+!verifier.py
+!blast-radius-sample/
+blast-radius-sample/*
+!blast-radius-sample/requirements.lock
