@@ -11,7 +11,7 @@ from pathlib import Path
 from impact import changed_files, git_diff_text
 from semantic import classify_change, literal_generator_override, statement_spans
 from predicate import comparison_swap
-from structural import literal_binding
+from structural import literal_binding, terminal_assertion
 from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
                      week_offset_edit, week_offset_sites)
 
@@ -369,8 +369,13 @@ def decide(diff, data, mode='scope'):
     """Return stable IDs, or None to invoke full-suite fallback."""
     if data is None:
         return None, 'catalog'
+    structural = data.get('structural_evidence', {})
+    sources = data['sources']
+    test_sources = structural.get('tests', {})
+    if mode == 'scope' and test_sources:
+        sources = sources | {path: record['source'] for path, record in test_sources.items()}
     try:
-        updates = apply_patch(diff, data['sources'])
+        updates = apply_patch(diff, sources)
     except (ValueError, IndexError):
         return None, 'unsupported_diff'
     hits = data['hits']
@@ -394,6 +399,22 @@ def decide(diff, data, mode='scope'):
                 return None, 'fixture_text'
             if not readers:
                 return None, 'unobserved_fixture'
+        elif path in test_sources:
+            original = sources[path]
+            try:
+                edit = terminal_assertion(original, new) if len(updates) == 1 else None
+            except (SyntaxError, ValueError, RecursionError):
+                edit = None
+            if not edit or test_sources[path]['assertions'].get(edit[0]) != list(edit[1:]):
+                return None, 'test_structure'
+            candidate = path + '::' + edit[0]
+            if candidate not in data['ids']:
+                return None, 'test_structure'
+            chosen.update(hits.get('!untraced', ()))
+            chosen.update(data.get('line_evidence', {}).get('extra', ()))
+            if -1 in chosen:
+                return None, 'shared_or_missing'
+            return {candidate} | {data['ids'][i] for i in chosen}, 'test_assertion'
         elif path.startswith('sqlglot/') and path.endswith('.py'):
             original = data['sources'][path]
             # Python ends lines only at \r\n, \r or \n; str.splitlines also splits at \x0c, \x85, ...

@@ -5,16 +5,17 @@ from pathlib import Path
 import subprocess
 import sys
 
-FILES = ('selector.py', 'hybrid.py', 'semantic.py', 'impact.py', 'numeric.py', 'predicate.py',
-         'evidence.gz', 'lines.gz', 'predicates.gz')
-
-
 def output(*args):
     return subprocess.check_output(args)
 
 
 def main(commit, image, patches):
     sha = output('git', 'rev-parse', commit).decode().strip()
+    dockerfile = output('git', 'cat-file', 'blob', f'{sha}:Dockerfile').decode()
+    files = [name for line in dockerfile.splitlines() if line.startswith('COPY ') and line.endswith(' /app/')
+             for name in line.split()[1:-1] if name.endswith(('.py', '.gz'))]
+    if not files:
+        raise SystemExit('no production files found in Dockerfile')
     image_id = output('docker', 'image', 'inspect', image, '--format', '{{.Id}}').decode().strip()
     flags = ('docker', 'run', '--rm', '--platform', 'linux/amd64', '--network', 'none',
              '--cpus', '2', '--memory', '4096m', '--memory-swap', '4096m', '--pids-limit', '256',
@@ -23,8 +24,8 @@ def main(commit, image, patches):
     packaged = output(*flags, image_id, 'python', '-c',
                       'import hashlib,pathlib,sys\nprint(sys.version.split()[0])\n'
                       'for name in sys.argv[1:]:\n print(hashlib.sha256(pathlib.Path("/app",name).read_bytes()).hexdigest())',
-                      *FILES).decode().splitlines()
-    digests = {file: sha256(output('git', 'cat-file', 'blob', f'{sha}:{file}')).hexdigest() for file in FILES}
+                      *files).decode().splitlines()
+    digests = {file: sha256(output('git', 'cat-file', 'blob', f'{sha}:{file}')).hexdigest() for file in files}
     if packaged[1:] != list(digests.values()):
         raise SystemExit('image contents differ from Git blobs')
     catalog = Path('blast-radius-sample/sample/tests.json').resolve()

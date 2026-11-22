@@ -53,6 +53,18 @@ returns nonzero if any labels are missing, inconclusive or missed. Completed
 cases still receive a separate aggregate. Generated patches and labels live
 under .phase5/generalization and are excluded from the production build.
 
+## Reproduce Phase 12 structural evidence
+
+Use the same pinned archive and locked trace image. Record the assertion
+observations in both orders, then build the deterministic metadata file.
+
+    docker run --rm --network none --cpus 3 --memory 3600m -e OPENBLAS_NUM_THREADS=1 \
+        -v "$PWD:/repo" phase5-trace python /repo/tools/audit_assertions.py
+    docker run --rm --network none --cpus 3 --memory 3600m -e OPENBLAS_NUM_THREADS=1 \
+        -v "$PWD:/repo" phase5-trace python /repo/tools/audit_assertions.py reverse
+    python tools/pack_structural.py
+    python tools/generalization.py score --split validation
+
 ## Submission
 
 Use the public repository https://github.com/bob-the-doorknob/plingplong and the full validated commit SHA at the [official track](https://www.joinbuilders.org/buildathon/tracks/blast-radius). The accepted all-tests revision is `205133366ef9ed2be41a56ac606a51b5d5ac6d5e`.

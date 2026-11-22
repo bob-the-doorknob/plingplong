@@ -5,10 +5,10 @@ import gzip
 import json
 import sys
 
-from generalization import archive, CATALOG, ROOT, PIN, digest
+from generalization import archive, CATALOG, ROOT, PIN, digest, complete_label
 
 sys.path.insert(0, str(ROOT))
-from structural import global_readers, SCALARS
+from structural import global_readers, plain_test_class, _assertion_literal, SCALARS
 
 
 def main():
@@ -60,6 +60,55 @@ def main():
             if readers:
                 globals_index.setdefault(path, {})[name] = sorted(readers)
     data = dict(version=1, pin=PIN, ids=ids, base_digest=digest(base), globals=globals_index)
+    paths = [ROOT/'.phase5'/f'assertions-{order}.json' for order in range(2)]
+    if all(p.exists() for p in paths):
+        reports = [json.loads(p.read_bytes()) for p in paths]
+        catalog = CATALOG.read_bytes()
+        assert all(complete_label(r, b'', json.loads(catalog), digest(catalog)) for r in reports)
+        uncertain = {ids[i] for i in evidence['hits']['!untraced']}
+        assert reports[0]['exit'] == 0 and set(reports[1]['failed']) <= uncertain
+        read = set(reports[0]['read']) | set(reports[1]['read'])
+        actual = reports[0]['types']
+        mentioned = defaultdict(set)
+        for path, tree in trees.items():
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name):
+                    mentioned[node.id].add(path)
+                elif isinstance(node, ast.Attribute):
+                    mentioned[node.attr].add(path)
+        tests = {}
+        for case in ids:
+            path, *names = case.split('::')
+            if len(names) != 2 or path not in trees or path in read:
+                continue
+            module = path[:-3].replace('/', '.')
+            parent, leaf = module.rsplit('.', 1)
+            cls, method = names
+            if (module in modules or ('attribute:' + leaf) in modules
+                    or (parent, leaf) in imports or any(m == module for m, _ in imports)
+                    or any(mentioned[name] - {path} for name in (cls, method))):
+                continue
+            tree = trees[path]
+            if not any(isinstance(n, ast.Import) and any(a.name == 'unittest' and not a.asname for a in n.names)
+                       for n in tree.body):
+                continue
+            for node in tree.body:
+                if not plain_test_class(node) or node.name != cls:
+                    continue
+                for fn in node.body:
+                    if not isinstance(fn, ast.FunctionDef) or fn.name != method:
+                        continue
+                    observation = _assertion_literal(fn)
+                    if not observation:
+                        continue
+                    call, _, value = observation
+                    site = f'{path}:{call.lineno}'
+                    kind = type(value.value).__name__
+                    if actual.get(site) == reports[1]['types'].get(site) == [kind]:
+                        tests.setdefault(path, {'source': sources[path], 'assertions': {}})['assertions'][
+                            f'{cls}::{method}'] = [call.lineno, kind]
+        data['tests'] = tests
+        print('assertion candidates', sum(len(record['assertions']) for record in tests.values()))
     (ROOT/'structural.gz').write_bytes(gzip.compress(json.dumps(data, sort_keys=True).encode(), mtime=0))
     print(globals_index)
 

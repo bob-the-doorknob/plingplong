@@ -79,6 +79,8 @@ PHASE12 = {
     'test_tail_literal': ('test_side', 'validation', [(TIME_TEST,
         'self.assertEqual(format_time("da", mapping), "db")',
         'self.assertEqual(format_time("da", mapping), "bad")')]),
+    'expr_tail_count': ('test_side', 'validation', [('tests/test_expressions.py',
+        'self.assertEqual(len(ast.expressions), 2)', 'self.assertEqual(len(ast.expressions), 3)')]),
     'test_tail_int': ('test_side', 'validation', [(TIME_TEST,
         'self.assertEqual(0, subsecond_precision("garbage"))',
         'self.assertEqual(1, subsecond_precision("garbage"))')]),
