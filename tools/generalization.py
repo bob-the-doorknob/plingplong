@@ -160,6 +160,16 @@ PHASE16 = {
 }
 CASES.update(PHASE16)
 
+# Independent Phase 16 checks on keys and bindings outside the p16 recipes.
+P16_VALIDATION = {
+    'p16v_mysql_alias': ('mapping_key', 'p16val', [('sqlglot/generators/mysql.py', '"months": "month",', '"months": "week",')]),
+    'p16v_postgres_minute': ('mapping_key', 'p16val', [('sqlglot/generators/postgres.py',
+        '"MINUTE": " / 60",\n    "HOUR": " / 3600",\n    "DAY"', '"MINUTE": " / 30",\n    "HOUR": " / 3600",\n    "DAY"')]),
+    'p16v_trunc_quarter': ('mapping_key', 'p16val', [('sqlglot/dialects/dialect.py', '"QUARTER": "Q",', '"QUARTER": "MM",')]),
+    'p16v_tsql_weekday': ('mapping_key', 'p16val', [('sqlglot/generators/tsql.py', '"DAYOFWEEK": "WEEKDAY",', '"DAYOFWEEK": "DAY",')]),
+}
+CASES.update(P16_VALIDATION)
+
 
 def digest(payload):
     return hashlib.sha256(payload).hexdigest()

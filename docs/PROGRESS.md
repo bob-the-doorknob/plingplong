@@ -1011,3 +1011,52 @@ needs a stronger import-state proof. The default affects many
 generators, and observed constructor coverage alone would still cost
 29.454 seconds before broader safety guards. Both remain full-suite.
 These local results do not establish a new official score.
+
+## Phase 16 verification - 2026-11-22
+
+Recovered the interrupted work as the pushed WIP 66129ea80379b4c845a8a8f543e185ef599089be
+on phase16-precision-evidence, started from main bedff2218e9e7615af1e16d27250434d76985bfb.
+This macOS machine has no separate .worktrees/phase16; the branch is checked
+out in the main folder. Nothing was lost.
+
+Production change review: precision.gz holds key-level readers for seven
+source-closed literal dictionaries (no other file names them, every reference
+is a key lookup inside a function body) and attribute readers of the package
+scalar pretty (every access is sqlglot.pretty through a module alias). A
+binding observed at import (shared) or missing from either order is dropped.
+Edits must keep keys, order and value types. The narrowed path keeps raw
+readers, untraced and line-evidence extras, plus the two-order failures. It
+skips static importers, which is sound because importing never reads these
+bindings. The ordered verifier stays in the optional verifier stage only.
+
+Reproducibility: tools/collect_precision.sh rebuilt both orders in the locked
+image in 196 s. tools/pack_precision.py produced identical decompressed
+content. Only the gzip byte stream differed from the Windows-built file, so the
+committed file (079486000c43a562...) was kept.
+
+| Split (complete labels) | Phase 15 CI (s) | Phase 16 CI (s) | Full | Misses |
+| --- | ---: | ---: | ---: | ---: |
+| Public 30 | 129.530 | 129.530 | 0 -> 0 | 0 |
+| Frozen holdout 17 | 275.577 | 274.512 | 2 -> 1 | 0 |
+| Dev 14 | 245.287 | 245.287 | 2 -> 2 | 0 |
+| Validation 6 | 98.559 | 98.559 | 1 -> 1 | 0 |
+| P13 16 | 229.976 | 229.976 | 2 -> 2 | 0 |
+| P14 3 | 66.305 | 66.305 | 1 -> 1 | 0 |
+| P15 4 | 50.631 | 50.631 | 1 -> 1 | 0 |
+| P16 4 | 77.931 | 8.968 | 2 -> 0 | 0 |
+| P16 dev 2 | 39.367 | 38.854 | 1 -> 1 | 0 |
+| New independent p16val 4 | 43.599 | 8.711 | 1 -> 0 | 0 |
+
+All p16 and p16val labels were regenerated on this machine. The new p16val
+cases edit keys outside the p16 recipes (MySQL, Postgres, root trunc formats
+and T-SQL). Each retained every failing test with 3 to 6 selected.
+
+Restricted Docker under amd64 emulation, three runs each, identical outputs,
+with one label container running concurrently: public 129.530 s and 1.43 s
+median CPU (Phase 15 1.39 s); holdout 274.512 s and 1.34 s (Phase 15 275.577 s
+and 1.32 s). Holdout total 275.853 versus 276.892 seconds. make sample and make
+check passed and 137 unit tests passed.
+
+The gain is confined to edits of the seven certified bindings and pretty. On
+every other measured split Phase 16 selects exactly what Phase 15 selects. Its
+expected effect on the hidden official batch is therefore small.
