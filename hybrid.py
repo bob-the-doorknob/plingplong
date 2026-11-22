@@ -14,7 +14,7 @@ from pathlib import Path
 from impact import changed_files, git_diff_text
 from semantic import without_docstrings, classify_change, literal_generator_override, statement_spans
 from predicate import comparison_swap
-from structural import literal_binding, terminal_assertion
+from structural import literal_binding, terminal_assertion, passive_generator_class
 from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
                      week_offset_edit, week_offset_sites)
 
@@ -853,6 +853,28 @@ def entrypoint_tests(diff, data):
     return None if -1 in chosen else {data['ids'][i] for i in chosen}
 
 
+def passive_generator_tests(data, path, old, new):
+    root = 'sqlglot/generator.py'
+    evidence = data.get('classes')
+    if (data.get('pin') != PIN or not path.startswith('sqlglot/generators/')
+            or not evidence or root not in data['sources'] or 'test_evidence' not in data):
+        return None
+    addition = passive_generator_class(old, new, data['sources'][root])
+    if not addition or any(pinned_mentions(data, name) for name in (addition[0], '__subclasses__')):
+        return None
+    base = path + '::' + addition[1]
+    parent = root + '::Generator'
+    children, _ = class_index(evidence)
+    if evidence['M'].get(base) != [parent] or children.get(base) or evidence['M'].get(parent) != []:
+        return None
+    if any(key in evidence['W'] for cls in (base, parent)
+           for key in (cls + '@__init_subclass__', cls + '@__bases__', cls + '@__dict__')):
+        return None
+    if any(cls + '@__dict__' in evidence['I'] for cls in (base, parent)):
+        return None
+    return tests_of(evidence['R'].get(base)) or None
+
+
 def decide(diff, data, mode='scope'):
     """Return stable IDs, or None to invoke full-suite fallback."""
     if data is None:
@@ -961,6 +983,13 @@ def decide(diff, data, mode='scope'):
                             configuration_reason = 'module_scalar'
                             continue
                 if mode == 'scope' and len(updates) == 1 and not change.get('class_attributes'):
+                    passive = passive_generator_tests(data, path, original, new)
+                    if passive is not None:
+                        chosen.update(passive)
+                        chosen.update(hits.get(path + '::@importers', ()))
+                        chosen.update(data.get('line_evidence', {}).get('extra', ()))
+                        configuration_reason = 'passive_generator_class'
+                        continue
                     override = generator_override_tests(data, path, original, new)
                     if override is not None:
                         chosen.update(override)

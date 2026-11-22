@@ -121,3 +121,45 @@ def terminal_assertion(old, new):
                 return a.name + '::' + first.name, call.lineno, type(value.value).__name__
             return None
     return None
+
+def passive_generator_class(old, new, generator_source):
+    """Recognize an appended private class whose plain creation runs no user hooks."""
+    if not new.startswith(old):
+        return None
+    before, after = ast.parse(old), ast.parse(new)
+    if len(after.body) != len(before.body) + 1:
+        return None
+    addition = after.body.pop()
+    if (not isinstance(addition, ast.ClassDef) or addition.decorator_list or addition.keywords
+            or getattr(addition, 'type_params', ()) or not addition.name.startswith('_')
+            or addition.name.startswith('__') or len(addition.bases) != 1
+            or not isinstance(addition.bases[0], ast.Name)
+            or ast.dump(before) != ast.dump(after)):
+        return None
+    for stmt in addition.body:
+        if isinstance(stmt, ast.Pass):
+            continue
+        if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name) and not stmt.targets[0].id.startswith('__')
+                and isinstance(stmt.value, ast.Constant)
+                and (stmt.value.value is None or type(stmt.value.value) in SCALARS)):
+            return None
+    name = addition.bases[0].id
+
+    def plain_base(module, name, bases):
+        definitions = [node for node in ast.walk(module)
+                       if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                       and node.name == name]
+        if len(definitions) != 1:
+            return False
+        cls = definitions[0]
+        return (cls in module.body and isinstance(cls, ast.ClassDef) and not cls.decorator_list
+                and not cls.keywords and not getattr(cls, 'type_params', ())
+                and [ast.unparse(base) for base in cls.bases] == bases
+                and not any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Store)
+                            for n in ast.walk(module))
+                and '__init_subclass__' not in ast.unparse(cls))
+
+    if plain_base(before, name, ['generator.Generator']) and plain_base(ast.parse(generator_source), 'Generator', []):
+        return addition.name, name
+    return None

@@ -394,3 +394,27 @@ class FileLifecycle(unittest.TestCase):
         data = {'pin': PIN, 'ids': ['test'], 'sources': {path: 'import argparse\n'}, 'hits': {},
                 'test_evidence': {'sources': {'tests/test_cli.py': 'from sqlglot import _cli_name\n'}}}
         self.assertIsNone(decide(diff, data)[0])
+
+
+class PassiveGeneratorClass(unittest.TestCase):
+    def test_private_passive_append_retains_receivers(self):
+        from hybrid import PIN
+        from tools.generalization import git_diff
+        path, root = 'sqlglot/generators/demo.py', 'sqlglot/generator.py'
+        source = 'class Demo(generator.Generator):\n    pass\n'
+        rootcls, cls = root + '::Generator', path + '::Demo'
+        data = {'pin': PIN, 'ids': ['receiver', 'other', 'reader', 'uncertain'],
+                'sources': {path: source, root: 'class Generator:\n    pass\n'},
+                'classes': {'M': {rootcls: [], cls: [rootcls]}, 'I': {}, 'R': {cls: [0]}, 'W': []},
+                'test_evidence': {'sources': {}}, 'hits': {path: [2], '!untraced': [3]}}
+        suffix = '\nclass _Compatibility(Demo):\n    FEATURE = True\n'
+        diff = git_diff(path, source, source + suffix)
+        self.assertEqual(decide(diff, data), ({'receiver', 'reader', 'uncertain'}, 'passive_generator_class'))
+        for edit in (suffix.replace('_Compatibility', 'Demo'), suffix.replace('True', 'other()'),
+                     suffix.replace('FEATURE', '__slots__'), suffix.replace('(Demo)', '(make_base())')):
+            self.assertIsNone(decide(git_diff(path, source, source + edit), data)[0])
+        data['test_evidence']['sources']['tests/test_reflect.py'] = 'Demo.__subclasses__()'
+        self.assertIsNone(decide(diff, data)[0])
+        data['test_evidence']['sources'].clear()
+        data['classes']['W'].append(cls + '@__init_subclass__')
+        self.assertIsNone(decide(diff, data)[0])
