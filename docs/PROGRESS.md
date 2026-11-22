@@ -533,3 +533,31 @@ selector wall time was 1.062 s, peak RSS was at most 88532 KiB and stdout
 was 3214 bytes. No public patch selected the full suite. All 46
 completed mutations retained their 233 failing IDs across case runs.
 The Hive collection-error case remains inconclusive.
+
+P10-H removes a historical blanket guard only when an existing patch is
+disjoint from a certified direct Python child's file footprint. Matching
+startup, exit status and per-process reports in both suite orders are
+required. Every independently recorded executed SQLGlot path must appear
+in the child's audited file footprint. Other evidence can still select
+the same test, and the reverse-order safety guards remain active.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-H | 129.530 | 1.081 | 130.611 | 0 | 16.57 |
+
+P10-G is 96a1071bb32eb669192cf8b96ba920ebd509a306. H passed 86 tests
+on both host and Linux Python, plus make sample and make check. Three
+restricted runs emitted identical 3104-byte stdout. Peak RSS was 88664
+KiB and selector wall time was at most 1.139 s. Of 48 mutation cases,
+47 completed and retained all 234 failing IDs. The eager-import mutation
+failed the direct subprocess test and retained it through the structural
+fallback. The earlier Hive collection-error case is inconclusive.
+
+The hardened collection certified one direct test in both orders. Forward
+order passed 1620 numbered tests. Reverse order retained its two known
+parent failures. The shipped line index is 283942 bytes. The local score
+is 106.694 seconds below the Phase 9 measured total. The two remaining
+public TPC-DS selections are required by the public failure labels.
+Removing all three earlier blanket guards in a development-only ablation
+would still leave 119.590 simulated seconds before CPU. The ablation is
+not part of the selector.

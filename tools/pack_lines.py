@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
+from pack_direct_children import complete_footprints
 
 repo = Path('/repo')
 archive = repo / '.phase5/src.tar'
@@ -36,9 +37,12 @@ assert shards.keys() == startup.keys()
 for order in ('0', '1'):
     child_owners = {v['owner'] for v in startup.values() if v['order'] == order}
     assert set(baseline['child_files']) <= child_owners, (order, child_owners)
+executed = {}
 for shard in shards.values():
     shard_owners = set()
-    for path, lines in json.loads(shard.read_text()).items():
+    coverage = json.loads(shard.read_text())
+    executed[shard.stem] = set(coverage)
+    for path, lines in coverage.items():
         assert path in baseline['sources'], path
         for line, contexts in lines.items():
             for context in contexts:
@@ -60,10 +64,20 @@ for path, lines in sorted(observed.items()):
     for line, tests in sorted(lines.items()):
         key = (-1,) if -1 in tests else tuple(sorted(tests))
         files[path][line] = groups.setdefault(key, len(groups))
+direct_root = Path('/tmp/direct-children')
+direct = {}
+if {report.name for report in direct_root.glob('*.json')} == startup.keys():
+    direct = complete_footprints(
+        direct_root, owners, set(baseline['hits'].get('!untraced', ())),
+        startup, executed,
+    )
+direct = {i: files for i, files in direct.items() if int(i) not in extra}
+print('Completed direct-child traces for', len(direct), 'test IDs')
 payload = {
     'version': 1, 'pin': baseline['pin'], 'ids': ids, 'extra': sorted(extra),
     'base_digest': hashlib.sha256((repo / 'evidence.gz').read_bytes()).hexdigest(),
     'groups': list(groups), 'files': files, 'child_files': sorted(child_files),
+    'certified_direct_children': direct,
 }
 output = repo / 'lines.gz'
 output.write_bytes(gzip.compress(json.dumps(payload, separators=(',', ':')).encode(), mtime=0))
