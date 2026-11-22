@@ -561,3 +561,47 @@ public TPC-DS selections are required by the public failure labels.
 Removing all three earlier blanket guards in a development-only ablation
 would still leave 119.590 simulated seconds before CPU. The ablation is
 not part of the selector.
+
+## Phase 11: generalization benchmark - 2026-11-22
+
+Started from Phase 10-H (32a3fe450d5f307703a4691f9180a235f49c46f3).
+Fetched main at 8e48a59da0964d3f1955abd68c01821373797c14 with an identical
+tree. The Phase 10-H public reproduction was 129.530 simulated seconds,
+zero misses, zero full-suite fallbacks, 86 tests passed, and successful
+Make sample and format checks. Three runs on this host had a median
+1.155 CPU seconds, up to 88488 KiB RSS and identical 3104-byte output.
+
+The two reported practice results cost 334.724 and 344.968 simulated
+seconds with zero misses. Their submitted SHAs are unknown. The public
+result normalizes to 172.707 seconds per 40 patches, a batch-size
+diagnostic only. Almost all the reported difference is simulated CI.
+The site exposes no per-patch practice decisions.
+
+All Phase 10-H full-suite paths:
+
+| Reason | Trigger |
+| --- | --- |
+| catalog | Missing, unreadable, wrong-revision or mismatched test-ID evidence |
+| unreadable_patch | Invalid UTF-8, I/O failure or analysis recursion limit |
+| unsupported_diff | Unindexed path, nonstandard header, malformed hunk or context/position mismatch |
+| invalid_python / encoding_cookie | Syntax/compile error or a potentially significant encoding declaration |
+| fixture_text / unobserved_fixture | Fixture comment-only, SQL block delimiter change or absent readers |
+| structural_or_text | Signature, import, runtime binding, new/deleted class or method, core class value or opaque semantic change |
+| class_evidence / unobserved_class / unobserved_attribute | Missing class metadata, receivers or observed reads |
+| import_module_read | Import-time class dependency reaches unattributed module state |
+| unobserved_scope | Changed code object's qualified name has no observation |
+| shared_or_missing | Unattributed execution or raw-reader evidence, or no observed candidate for a code change |
+| unknown | Indexed fixture path without a supported language or file type |
+
+An unsupported statement or predicate annotation keeps function
+coverage. It is a full-suite fallback only when broader evidence also
+fails. Additions, deletions, renames, copies, modes, binary edits and
+quoted paths lack the same-path reconstruction proof. Zero-context and
+multihunk edits are validated against exact pinned content and positions.
+
+The new tools/generalization.py harness verifies the archive, pins
+organizer pytest, checks the entire collection and expected skips, and
+scores with the official scorer. It freezes development and holdout
+cases. Missing reports, timeouts, collection errors and unexpected skips
+are inconclusive. Ground-truth labels and generated patches remain in
+.phase5, outside the production image.
