@@ -353,3 +353,14 @@ class ModuleBindings(unittest.TestCase):
         data = self.data()
         data['hits'][self.PATH + '::render'] = [-1]
         self.assertIsNone(self.run_patch(self.OLD.replace('LIMIT = 3', 'LIMIT = 4'), data)[0])
+
+
+class NamespaceReflection(unittest.TestCase):
+    def test_only_own_namespace_access_counts(self):
+        import ast
+        from hybrid import _reflects_namespace
+        for source, expected in [('def f(o):\n    return getattr(o, "x")\n', False), ('X = globals()\n', True),
+                                 ('def f():\n    return vars()\n', True), ('def f(o):\n    return vars(o)\n', False),
+                                 ('import sys\nM = sys.modules[__name__]\n', True), ('m = __import__("a")\n', True)]:
+            with self.subTest(source=source):
+                self.assertEqual(_reflects_namespace(ast.parse(source)), expected)

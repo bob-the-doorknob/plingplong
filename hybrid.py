@@ -366,6 +366,21 @@ def _bindings_of(statement):
     return None
 
 
+def _reflects_namespace(tree):
+    """True when a module can read or write its own globals by computed name."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in ('globals', 'locals', 'exec', 'eval', '__import__') or (
+                    node.func.id == 'vars' and not node.args):
+                return True
+        if isinstance(node, ast.Attribute) and node.attr == 'modules' and isinstance(node.value, ast.Name) \
+                and node.value.id == 'sys':
+            return True
+        if isinstance(node, ast.Name) and node.id == '__dict__':
+            return True
+    return False
+
+
 def module_binding_tests(data, path, old, new):
     """Tests reaching functions that load changed top-level bindings of a module, or None.
 
@@ -402,7 +417,7 @@ def module_binding_tests(data, path, old, new):
         changed |= {name for name in x.keys() | y.keys() if x.get(name) != y.get(name) or isinstance(a, ast.Assign)}
     if not changed:
         return None
-    if re.search(r'\b(globals|vars|locals|exec|eval|__dict__|getattr|setattr)\b', old):
+    if _reflects_namespace(before):
         return None
     for name in changed:
         if sum(name in (_bindings_of(st) or {}) or getattr(st, 'name', None) == name for st in before.body) != 1:
