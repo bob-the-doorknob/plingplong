@@ -389,3 +389,147 @@ a harness syntax error. Reproduce any case with the commands in README.md.
 | registry_clone | Registry state | 0 | 0 | 7 | 2.946 | observed | None |
 | registry_in_place | Registry state | 1 | 7 | 1620 | 36.817 | structural_or_text | None |
 | registry_trigger_event | Registry state | 1 | 7 | 10 | 2.480 | observed | None |
+
+## Phase 10 checkpoints
+
+| Checkpoint | SHA | Simulated (s) | Median CPU (s) | Public misses | Mean tests | Status |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Phase 9 | 126d08304548e3aadff3c285ab5d4db40ed9d66c | 236.606 | 0.699 | 0 | 80.97 | Verified baseline |
+| P10-A | See baseline profiling commit | 236.606 | 0.767 | 0 | 80.97 | Reproduced |
+
+P10-A ran 69 tests, make sample, make check and three identical restricted
+runs. Maximum peak RSS was 54328 KiB and maximum selector wall time 0.892 s.
+Three patches cost 27.454 s each, followed by 25.454 s and 16.155 s. The first
+four select TPC-DS at 21.454 s. The fifth uses 498 tests and has an 8.155 s
+makespan. See benchmark.py --details for per-patch evidence. The plan is to
+collect independent line coverage, score narrow statement edits, then use
+measured costs to decide whether runtime probes merit an experiment.
+
+P10-B adds a separate 281923-byte line index with 53027 observed source lines
+from two organizer-compatible orders. Missing or shared spans retain function
+coverage. Same-shape literal and operator edits use the original condition or
+statement span. Insertions, deletions, lambda edits and definition-time edits
+retain the earlier behavior.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-B | 234.442 | 0.950 | 235.392 | 0 | 78.37 |
+
+The linux/amd64 Make targets and three identical restricted runs passed.
+Peak RSS was 77636 KiB, selector wall time was at most 1.032 s and stdout
+was 11968 bytes. The 31 completed Phase 9 mutations kept all 155 failures.
+New comparison and guard mutations kept 52 failing IDs. The additional
+optimizer boolean mutation completed without failures. Rebuild the line index
+with the same trace image as README.md and /repo/tools/collect_lines.sh.
+
+P10-B index verification was repeated with startup and exit manifests for
+every traced Python process. Both suite orders produced the exact previously
+committed line index blob 9c019d24bd9db238944145c23ee28adcd4d8005b. This
+checks collected child-process completion in addition to test outcomes.
+
+P10-C records whether identity and equality transports return the same bool
+at an operand pair with audited native comparison slots. The offline AST
+instrumentation retains operand evaluation order and the original operator
+result. The group index requires agreement for the individual test in both
+suite orders. Any divergence or unsupported observation blocks that test.
+Shared ambiguities block the site. Pool tasks carry their submitting test ID
+and all started interpreter shards must complete. Test importers, text
+readers and untraced tests are kept independently of this evidence.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-C | 204.090 | 1.004 | 205.094 | 0 | 74.00 |
+
+P10-A is 0bf39c25e32b2b0542bc91790dc1d27917d5b9a8. P10-B is
+9b02a4e54594d185de5e81cd7c76d52412aab6bc, with collection hardening in
+fbbf7c90934183618a2aa656b1618da046e823e6. The predicate index is 33578 bytes.
+Its baseline instrumented run passed all 1620 numbered tests. Reverse order
+reproduced the two known parent failures. Restricted Docker emitted
+11311 identical bytes in three runs, at most 78664 KiB peak RSS and 1.068 s
+selector wall time. Both Make targets and 77 unit tests passed.
+One independent identity mutation retained all 6 failing IDs. A second
+completed without failures. The Hive collection error remains inconclusive.
+A development-only oracle computed with the public scorer was 94.351 s.
+
+A restricted single-test TPC-DS run passed all 57 subtests and used 22.170 s
+CPU at 15.987 s wall time. For an independent optimizer mutation, the
+optimizer-only probe produced 57 unchanged expression graphs at 2.401 s
+CPU, compared with 2.991 s for the original. This measures a bounded stage.
+The probe does not reproduce executor input serialization, plan execution
+or the DuckDB comparison. It supplies no exclusion evidence to production.
+
+P10-D uses the submitting test ID inside each worker task. Startup and exit
+records must match, and both suite orders must show attributable SQLGlot
+execution in the optimizer and executor pools. Worker initialization still
+uses the test-file context. Line selection and operand agreement apply
+independently, and ambiguous tests retain their separate protection.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-D line only | 214.161 | Unmeasured | Unmeasured | 0 | 60.70 |
+| P10-D integrated | 169.621 | 0.940 | 170.561 | 0 | 56.13 |
+
+P10-C is 832d0529c6528f1b01bc1ca2835788dbd81b3ed6. The P10-D line map is
+283635 bytes. Both WSL Make targets passed, as did three identical 8620-byte
+restricted runs. Peak RSS was 72884 KiB and maximum selector wall time 0.996 s.
+The independent mutation matrix retained every labeled failure.
+The fresh-table copy experiment was kept out of this candidate. Its first
+trial saved 0.156 simulated seconds, and review identified constructor
+wrapping as a possible escape of the otherwise fresh object.
+
+P10-E narrows an isolated radix edit to one existing entry in a literal
+NUMERIC_ESCAPES map. The pinned import and generation sites use key
+membership or truthiness. Reads of the radix occur only in the tokenizer's
+two numeric helpers. Missing scope coverage, shared reads, unfamiliar
+initializers, reflective readers and runtime attribute writes retain
+conservative coverage. The change uses original source and line/function
+evidence across all dialects and never reverse engineers the failing IDs.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-E | 159.754 | 0.891 | 160.645 | 0 | 40.40 |
+
+P10-D is 0144122cb13a27f1e446d18cfc1875b0e67e8aa1. E passed 82 unit tests,
+both Make targets and three identical 6533-byte runs. Peak RSS was 73140
+KiB and maximum selector wall time 0.952 s. Five separate numeric mutations
+completed and retained all observed failures. DuckDB, Snowflake and
+ClickHouse selected via the new rule, with no observed failing tests. Spark
+and the failing Postgres case retained class-based selection. Review found
+no pinned reflection or persistent cache of decoded results. Cross-test
+state remains an empirical assumption.
+
+P10-F projects isolated nonzero week-offset edits onto all five pinned
+arithmetic and formatting reads. Missing line evidence, class writes,
+generic import-time consumers and zero or out-of-range values preserve
+class-based coverage. Review confirmed no cached derived week value in the
+pinned consumers and identified the old optimizer-wide class attribution
+as the source of most avoidable candidates.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-F | 147.238 | 1.021 | 148.259 | 0 | 29.60 |
+
+P10-E is 5ef6ad182655aeb78a32ab7ce7f4b1d29519c669. F passed 83 unit
+tests and both Make targets. Three restricted runs emitted identical 5038
+bytes, at most 88492 KiB peak RSS and 1.070 s selector wall time. The three
+independent week mutations completed. The BigQuery failure was kept among
+13 tests. The Teradata zero edit used the class fallback and kept its one
+failure. Oracle had no failures.
+
+P10-G matches Boolean regrouping when the ordered leaf expressions are
+unchanged and an original executable statement anchors the edit. Candidates
+come from the full original statement span. Unmapped or shared spans keep
+function coverage. The independent canonicalize guard mutation retained all
+17 failing IDs among 69 selected. Review found no pinned first-divergence
+counterexample.
+
+| Checkpoint | Simulated | Median selector CPU | Total | Public misses | Mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P10-G | 138.664 | 0.984 | 139.648 | 0 | 17.47 |
+
+P10-F is 01a7922543f8a420558ea555119b67a31cc64481. P10-G passed 84 unit
+tests, both WSL Make targets and three identical restricted runs. Maximum
+selector wall time was 1.062 s, peak RSS was at most 88532 KiB and stdout
+was 3214 bytes. No public patch selected the full suite. All 46
+completed mutations retained their 233 failing IDs across case runs.
+The Hive collection-error case remains inconclusive.

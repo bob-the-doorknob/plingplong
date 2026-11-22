@@ -2,13 +2,17 @@
 import base64
 import difflib
 import gzip
+import hashlib
 import json
 import re
 import zlib
 from pathlib import Path
 
 from impact import changed_files
-from semantic import classify_change
+from semantic import classify_change, statement_spans
+from predicate import comparison_swap
+from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
+                     week_offset_edit, week_offset_sites)
 
 PIN = 'eb11aec4be8cb2122afe713a4816662c3f0fb2fa'
 
@@ -206,14 +210,124 @@ def class_attribute_tests(data, path, changes, isolated=False):
     return chosen, 'observed'
 
 
+def configuration_members(evidence, cls, base, attr, allow_dialect_import=False):
+    children, _ = class_index(evidence)
+    if cls not in family(base, children):
+        return None
+    members = family(cls, children)
+    for member in members:
+        assigned, generic = member + '@' + attr, member + '@__dict__'
+        if assigned in evidence['W'] or generic in evidence['W']:
+            return None
+        if any(not allow_dialect_import or not owner.startswith('sqlglot/dialects/')
+               for owner in evidence['I'].get(assigned, ())):
+            return None
+        if any(owner not in members for owner in evidence['I'].get(generic, ())):
+            return None
+    return members
+
+
+def numeric_escape_tests(data, path, old, new, change):
+    """Select numeric decoder users when a literal map's import-time keys stay fixed."""
+    if change['attr'] != ATTRIBUTE or change['body_read'] or not path.startswith('sqlglot/dialects/'):
+        return None
+    evidence = data.get('classes')
+    lines = data.get('line_evidence')
+    if not evidence or not lines or DECODER not in lines['files']:
+        return None
+    cls = path + '::' + change['cls']
+    if not numeric_radix_edit(old, new, change['cls']):
+        return None
+    # The pinned dialect initializer uses only key presence.
+    members = configuration_members(
+        evidence, cls, 'sqlglot/tokens.py::Tokenizer', ATTRIBUTE, allow_dialect_import=True,
+    )
+    if not members:
+        return None
+
+    sites = decoder_sites(data['sources'][DECODER])
+    if len(sites) != 2:
+        return None
+    readers = set()
+    for line, scope in sites:
+        group = lines['files'][DECODER].get(str(line))
+        if group is not None:
+            readers.update(lines['groups'][group])
+        else:
+            # A byte decoder may never be entered in the pinned suite. Keep its
+            # existing function evidence whenever exact line evidence is absent.
+            readers.update(data['hits'].get(DECODER + '::' + scope, ()))
+    if not readers or -1 in readers:
+        return None
+    for member in members:
+        readers.update(tests_of(evidence['A'].get(member + '@__dict__')))
+    return readers | set(lines['extra'])
+
+
+def week_offset_tests(data, path, old, new, change):
+    """Trace local arithmetic and generation that consumes a pinned scalar offset."""
+    if change['attr'] != WEEK_OFFSET or change['body_read'] or not path.startswith('sqlglot/dialects/'):
+        return None
+    evidence = data.get('classes')
+    lines = data.get('line_evidence')
+    if not evidence or not lines or not week_offset_edit(old, new, change['cls']):
+        return None
+    cls = path + '::' + change['cls']
+    members = configuration_members(evidence, cls, 'sqlglot/dialects/dialect.py::Dialect', WEEK_OFFSET)
+    if not members:
+        return None
+    sites = week_offset_sites(data['sources'])
+    if len(sites) != 5:
+        return None
+    readers = set()
+    for filename, line in sites:
+        group = lines['files'].get(filename, {}).get(str(line))
+        if group is None:
+            return None
+        readers.update(lines['groups'][group])
+    if not readers or -1 in readers:
+        return None
+    for member in members:
+        readers.update(tests_of(evidence['A'].get(member + '@__dict__')))
+    return readers | set(lines['extra'])
+
+
 def load(tests):
     try:
-        data = json.loads(gzip.decompress(Path(__file__).with_name('evidence.gz').read_bytes()))
+        base = Path(__file__).with_name('evidence.gz').read_bytes()
+        data = json.loads(gzip.decompress(base))
         if data['schema'] == 1 and data['pin'] == PIN and sorted(t['id'] for t in tests) == data['ids']:
+            digest = hashlib.sha256(base).hexdigest()
+            for filename, key in (('lines.gz', 'line_evidence'), ('predicates.gz', 'predicate_evidence')):
+                try:
+                    auxiliary = json.loads(gzip.decompress(Path(__file__).with_name(filename).read_bytes()))
+                    if (auxiliary['version'] == 1 and auxiliary['pin'] == PIN and auxiliary['ids'] == data['ids']
+                            and auxiliary['base_digest'] == digest):
+                        data[key] = auxiliary
+                except (OSError, EOFError, ValueError, KeyError, TypeError, zlib.error):
+                    pass
             return data
     except (OSError, EOFError, ValueError, KeyError, TypeError, zlib.error):
         pass
     return None
+
+
+def statement_tests(old, new, path, evidence):
+    files = evidence['files']
+    if path not in files:
+        return None
+    spans = statement_spans(old, new)
+    if not spans:
+        return None
+    lines = files[path]
+    candidates = set(evidence['extra'])
+    for start, end in spans:
+        groups = {lines[str(n)] for n in range(start, end + 1) if str(n) in lines}
+        if not groups:
+            return None
+        for group in groups:
+            candidates.update(evidence['groups'][group])
+    return candidates if -1 not in candidates else None
 
 
 def decide(diff, data, mode='scope'):
@@ -227,6 +341,9 @@ def decide(diff, data, mode='scope'):
     hits = data['hits']
     chosen = set(hits.get('!untraced', []))
     code_changed = False
+    statement_selected = False
+    predicate_selected = False
+    configuration_reason = None
     for path, new in updates.items():
         readers = hits.get(path, [])
         chosen.update(readers)
@@ -256,22 +373,56 @@ def decide(diff, data, mode='scope'):
             if change['structural']:
                 if not change.get('class_attributes') or is_core(path):
                     return None, 'structural_or_text'
-                found, reason = class_attribute_tests(
-                    data, path, change['class_attributes'],
-                    isolated=len(updates) == 1 and len(change['class_attributes']) == 1
-                    and not change['functions'],
-                )
+                isolated = len(updates) == 1 and len(change['class_attributes']) == 1 and not change['functions']
+                found = None
+                if mode == 'scope' and isolated:
+                    attribute = change['class_attributes'][0]
+                    found = numeric_escape_tests(data, path, original, new, attribute)
+                    if found is not None:
+                        configuration_reason = 'numeric_values'
+                    else:
+                        found = week_offset_tests(data, path, original, new, attribute)
+                        if found is not None:
+                            configuration_reason = 'week_offset'
+                if found is None:
+                    found, reason = class_attribute_tests(data, path, change['class_attributes'], isolated)
                 if found is None:
                     return None, reason
                 chosen.update(found)
             elif not change['functions']:
                 return None, 'structural_or_text'
             chosen.update(hits.get(path + '::@importers', ()))
+            scopes = set()
             for name in change['functions']:
                 key = path + '::' + name
                 if key not in hits:
                     return None, 'unobserved_scope'
-                chosen.update(hits[key])
+                scopes.update(hits[key])
+            if mode in ('statement', 'scope') and not change['structural'] and -1 not in scopes:
+                lines = data.get('line_evidence')
+                statements = statement_tests(original, new, path, lines) if lines else None
+                if statements is not None:
+                    scopes = statements
+                    chosen.update(lines['extra'])
+                    statement_selected = True
+
+                # Use agreement only for the same isolated expression edit. Imports,
+                # source readers and ambiguous tests have already entered chosen.
+                predicate = data.get('predicate_evidence')
+                if (mode == 'scope' and len(updates) == 1 and len(change['functions']) == 1
+                        and predicate and ('==' in diff or '!=' in diff)
+                        and re.search(r'\bis\b', diff)
+                        and (statements is not None or statement_spans(original, new))):
+                    site = comparison_swap(original, new)
+                    group = predicate['keys'].get(f'{path}:{site}') if site else None
+                    if group is not None:
+                        agreeing = set(predicate['groups'][group])
+                        remaining = scopes - agreeing
+                        if remaining != scopes:
+                            scopes = remaining
+                            chosen.update(predicate['extra'])
+                            predicate_selected = True
+            chosen.update(scopes)
             if mode == 'file':
                 for key, ids in hits.items():
                     if key.startswith(path + '::'):
@@ -280,4 +431,6 @@ def decide(diff, data, mode='scope'):
             return None, 'unknown'
     if -1 in chosen or (code_changed and not chosen):
         return None, 'shared_or_missing'
-    return {data['ids'][i] for i in chosen}, 'observed' if code_changed else 'comment_only'
+    reason = (configuration_reason or ( 'predicate' if predicate_selected else 'statement' if statement_selected
+              else 'observed' if code_changed else 'comment_only'))
+    return {data['ids'][i] for i in chosen}, reason

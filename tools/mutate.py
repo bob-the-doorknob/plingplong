@@ -66,6 +66,32 @@ REPLACEMENTS.update({
         'class Clone(Expression):\n    arg_types = {"this": True, "shallow": False, "copy": False}',
         'class Clone(Expression):\n    arg_types = {"this": True, "shallow": True, "copy": False}')],
 })
+REPLACEMENTS.update({
+    'statement_range_condition': [('sqlglot/helper.py', 'if start <= last_end:', 'if start < last_end:')],
+    'statement_executor_guard': [('sqlglot/executor/context.py', 'if self._table is None:', 'if self._table is not None:')],
+    'statement_optimizer_boolean': [('sqlglot/optimizer/eliminate_joins.py', 'if name in left_tables and name not in right_tables:', 'if name in left_tables or name not in right_tables:')],
+})
+REPLACEMENTS.update({
+    'predicate_column_identity': [('sqlglot/optimizer/merge_subqueries.py', 'if table_column.name == conflict:', 'if table_column.name is conflict:')],
+    'predicate_type_identity': [('sqlglot/optimizer/annotate_types.py', 'if e.name == expression.expression.name:', 'if e.name is expression.expression.name:')],
+})
+REPLACEMENTS.update({
+    'numeric_spark_unicode': [('sqlglot/dialects/spark.py', '"u": (16, 4, 4, 0xFFFF)', '"u": (15, 4, 4, 0xFFFF)')],
+    'numeric_postgres_octal': [('sqlglot/dialects/postgres.py', '"0": (8, 1, 3, 0o777)', '"0": (7, 1, 3, 0o777)')],
+    'numeric_duckdb_hex': [('sqlglot/dialects/duckdb.py', '"x": (16, 1, 2, 0xFF)', '"x": (10, 1, 2, 0xFF)')],
+})
+REPLACEMENTS.update({
+    'numeric_snowflake_hex': [('sqlglot/dialects/snowflake.py', '"x": (16, 2, 2, 0xFF)', '"x": (8, 2, 2, 0xFF)')],
+    'numeric_clickhouse_hex': [('sqlglot/dialects/clickhouse.py', '"x": (16, 2, 2, 0xFF)', '"x": (8, 2, 2, 0xFF)')],
+})
+REPLACEMENTS.update({
+    'week_oracle_offset': [('sqlglot/dialects/oracle.py', '    WEEK_OFFSET = -1', '    WEEK_OFFSET = 2')],
+    'week_bigquery_offset': [('sqlglot/dialects/bigquery.py', '    WEEK_OFFSET = -1', '    WEEK_OFFSET = 3')],
+    'week_teradata_zero': [('sqlglot/dialects/teradata.py', '    WEEK_OFFSET = -1', '    WEEK_OFFSET = 0')],
+})
+REPLACEMENTS.update({
+    'boolean_guard_canonicalize': [('sqlglot/optimizer/canonicalize.py', 'if isinstance(node, exp.Add) and node.type and node.type.this in exp.DataType.TEXT_TYPES:', 'if isinstance(node, exp.Add) and node.type or node.type.this in exp.DataType.TEXT_TYPES:')],
+})
 REPLACEMENTS['comment_mixed'] = REPLACEMENTS['function']
 
 

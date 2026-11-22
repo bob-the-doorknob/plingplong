@@ -40,6 +40,30 @@ hooked = set()
 CONTAINERS = {dict, list, set}
 last_snapshot = None
 last_test = None
+LINE_ONLY = os.environ.get('BR_LINES') == '1'
+line_hits = {}
+current_lines = set()
+
+
+def line_event(code, line, disable=getattr(getattr(sys, 'monitoring', None), 'DISABLE', None)):
+    path = code.co_filename
+    if path.startswith('/src/sqlglot/'):
+        current_lines.add((path[5:], line))
+    return disable
+
+
+def flush_lines():
+    for path, line in current_lines:
+        line_hits.setdefault(path, {}).setdefault(line, set()).add(context)
+    current_lines.clear()
+
+
+def dump_lines():
+    flush_lines()
+    with open(f'/tmp/lines/{os.getpid()}.json', 'w') as f:
+        json.dump({p: {n: sorted(ids) for n, ids in lines.items()}
+                   for p, lines in line_hits.items()}, f)
+
 
 
 def record(key):
@@ -236,6 +260,8 @@ def snapshot():
 def boundary(nodeid):
     """Compare sqlglot globals and class containers with the previous test boundary."""
     global last_snapshot, last_test
+    if LINE_ONLY:
+        return
     busy[0] = True
     try:
         current = snapshot()
@@ -270,15 +296,29 @@ def start():
     original_load = bootstrap._load_unlocked
     def shared_import(spec):
         global context, epoch
+        if LINE_ONLY:
+            flush_lines()
         previous = context, epoch
         context, epoch = '*', object()
         sys.monitoring.restart_events()
         try:
             return original_load(spec)
         finally:
+            if LINE_ONLY:
+                flush_lines()
             context, epoch = previous
             sys.monitoring.restart_events()
     bootstrap._load_unlocked = shared_import
+    if LINE_ONLY:
+        os.makedirs('/tmp/line-started', exist_ok=True)
+        with open(f'/tmp/line-started/{os.getpid()}.json', 'w') as f:
+            json.dump(dict(owner=context, order=os.environ.get('BR_REVERSE', '0')), f)
+        m = sys.monitoring
+        m.use_tool_id(3, 'blast-radius-lines')
+        m.register_callback(3, m.events.LINE, line_event)
+        m.set_events(3, m.events.LINE)
+        atexit.register(dump_lines)
+        return
     builtins.__build_class__ = build_class
     atexit.register(dump_classes)
     sys.addaudithook(audit)
@@ -290,6 +330,8 @@ def start():
 
 def owner(name):
     global context, epoch
+    if LINE_ONLY:
+        flush_lines()
     context = name
     epoch = object()
     # Every reader of a source file opens it again rather than hitting the cache.
