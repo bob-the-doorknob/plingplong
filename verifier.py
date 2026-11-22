@@ -10,6 +10,7 @@ import tempfile
 import time
 
 from hybrid import apply_patch
+from semantic import classify_change
 from impact import changed_files
 from selector import schedule, main as select
 
@@ -140,25 +141,59 @@ class Experiment:
     def __init__(self, enabled):
         self.enabled = enabled
         self.jobs_left = 20
+        self.tpc_left = 1
+        self.baselines = {}
         self.deadline = time.monotonic() + 100
 
-    def __call__(self, diff, ids, tests, evidence, reason):
+    def run(self, view, action, payload, timeout):
         remaining = self.deadline - time.monotonic()
-        if not ids or not self.jobs_left or 'cheap' not in self.enabled or remaining <= .1:
+        return child(view, action, payload, min(timeout, remaining)) if remaining > .1 else {}
+
+    def compare(self, view, action, payload, timeout):
+        key = (action, tuple(payload))
+        if key not in self.baselines:
+            with overlay(BASE, {}) as clean:
+                self.baselines[key] = self.run(clean, action, payload, timeout)
+        initial = self.baselines[key]
+        current = self.run(view, action, payload, timeout)
+        if not initial or not current:
+            return 'inconclusive'
+        if action == 'tpc' and any(row['graph'] is None for rows in (initial, current) for row in rows.values()):
+            return 'inconclusive'
+        return 'equal_projection' if initial == current else 'changed_projection'
+
+    def __call__(self, diff, ids, tests, evidence, reason):
+        if not ids or not self.jobs_left or not self.enabled & {'cheap', 'tpc'}:
             return ids
         protected = set(evidence['hits'].get('!untraced', ())) | set(evidence.get('line_evidence', {}).get('extra', ()))
         retained = {evidence['ids'][i] for i in protected if i >= 0}
-        proposed = plan([test for test in tests if test['id'] in ids], retained, 'calibrate' in self.enabled)
-        if not proposed:
+        candidates = [test for test in tests if test['id'] in ids]
+        proposed = plan(candidates, retained, 'calibrate' in self.enabled) if 'cheap' in self.enabled else []
+        tpc = [name for name, method in (('tpc-h', 'test_execute_tpch'), ('tpc-ds', 'test_execute_tpcds'))
+               if any(test.endswith('::TestExecutor::' + method) for test in ids)]
+        if not proposed and not ('tpc' in self.enabled and tpc and self.tpc_left):
             return ids
-        self.jobs_left -= 1
         try:
-            with overlay(BASE, read_updates(diff, BASE)) as view:
-                report = child(view, 'pytest', proposed, min(5, remaining))
-                observed = passed_tests(report, proposed)
-                status = 'reported' if report else 'inconclusive'
-                print('verification pytest', status, len(proposed), len(observed), file=sys.stderr)
-                return ids - observed
+            updates = read_updates(diff, BASE)
+            code = all(path.startswith('sqlglot/') and path.endswith('.py') for path in updates)
+            structural = code and any(classify_change((BASE/path).read_text(encoding='utf-8'), content)['structural']
+                                      for path, content in updates.items())
+            check_tpc = 'tpc' in self.enabled and bool(tpc) and self.tpc_left and code and not structural
+            if not proposed and not check_tpc:
+                return ids
+            self.jobs_left -= 1
+            with overlay(BASE, updates) as view:
+                report = self.run(view, 'pytest', proposed, 5) if proposed else {}
+                passed = passed_tests(report, proposed) if report else set()
+                remaining = ids - passed
+                if proposed:
+                    status = 'reported' if report else 'inconclusive'
+                    print('verification pytest', status, len(proposed), len(passed), file=sys.stderr)
+                if check_tpc:
+                    self.tpc_left -= 1
+                    for name in tpc:
+                        print('verification', name, self.compare(view, 'tpc', [name, False], 12), file=sys.stderr)
+                return remaining
         except (OSError, ValueError, KeyError, RecursionError):
             return ids
 
@@ -175,6 +210,9 @@ def main():
         result, action, payload = Path(sys.argv[2]), sys.argv[3], json.loads(sys.argv[4])
         if action == 'pytest':
             report = pytest_report(payload, result.parent/'pytest-tmp')
+        elif action == 'tpc':
+            from probes import tpc_handoff
+            report = tpc_handoff(*payload)
         else:
             raise ValueError(action)
         result.write_text(json.dumps(report))

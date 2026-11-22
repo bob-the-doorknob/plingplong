@@ -118,6 +118,21 @@ PHASE13 = {
 CASES.update(PHASE13)
 
 
+PHASE14 = {
+    'p14_test_order': ('shared_state', 'p14', [(TIME_TEST,
+        '    def test_canonical_time_format_vocabulary(self):',
+        '        type(self)._phase14_seen = True\n\n    def test_canonical_time_format_vocabulary(self):'),
+        (TIME_TEST, '    def test_subsecond_precision(self):',
+         '    def test_subsecond_precision(self):\n        self.assertFalse(getattr(type(self), "_phase14_seen", False))')]),
+    'p14_teardown': ('teardown', 'p14', [(TIME_TEST,
+        'class TestTime(unittest.TestCase):',
+        'class TestTime(unittest.TestCase):\n    def tearDown(self):\n        raise RuntimeError("teardown failure")\n')]),
+    'p14_trie_terminal': ('optimizer_input', 'p14', [(TRIE,
+        'if 0 in current:', 'if 0 not in current:')]),
+}
+CASES.update(PHASE14)
+
+
 def digest(payload):
     return hashlib.sha256(payload).hexdigest()
 
@@ -154,10 +169,13 @@ def git_diff(path, before, after, context=3):
 def generate(case, root):
     category, split, recipes = CASES[case]
     patch, paths = [], []
+    originals, updates = {}, {}
     for name, original, replacement in recipes:
         file = root / name
         before = file.read_bytes().decode('utf-8') if file.exists() else None
-        paths.append(name)
+        originals.setdefault(name, before)
+        if name not in paths:
+            paths.append(name)
         if category == 'file_renamed':
             file.rename(root / replacement)
             paths.append(replacement)
@@ -178,11 +196,13 @@ def generate(case, root):
             after = after.replace('\n', '\r\n')
         if before == after:
             raise ValueError((case, name, 'unchanged'))
-        patch.append(git_diff(name, before, after, context=0 if category == 'zero_context' else 3))
+        updates[name] = after
         if after is None:
             file.unlink()
         else:
             file.write_bytes(after.encode())
+    patch.extend(git_diff(name, originals[name], value, context=0 if category == 'zero_context' else 3)
+                 for name, value in updates.items() if value != originals[name])
     return ''.join(patch).encode(), paths
 
 
@@ -328,7 +348,7 @@ def main():
     parser.add_argument('action', choices=['list', 'generate', 'label', 'score'])
     parser.add_argument('case', nargs='?', choices=['baseline', *CASES])
     parser.add_argument('--checkout', type=Path, default=ROOT)
-    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'p13', 'all'], default='all')
+    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'p13', 'p14', 'all'], default='all')
     args = parser.parse_args()
     if args.action == 'list':
         print('\n'.join(['baseline', *CASES]))

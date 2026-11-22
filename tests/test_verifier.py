@@ -30,3 +30,40 @@ class VerifierTests(unittest.TestCase):
         self.assertEqual(passed_tests(report, ['ok', 'failed', 'skip']), {'ok'})
         self.assertEqual(passed_tests(report | {'collection_error': True}, report['collected']), set())
         self.assertEqual(passed_tests(report, ['different']), set())
+
+    def test_state_fingerprint_detects_nested_replacement_and_aliases(self):
+        from fingerprints import fingerprint
+        child = ['before']
+        first = {'x': child, 'alias': child}
+        self.assertNotEqual(fingerprint(first), fingerprint({'x': ['before'], 'alias': ['before']}))
+        previous = fingerprint(first)
+        child[0] = 'after'
+        self.assertNotEqual(previous, fingerprint(first))
+        child.append(first)
+        self.assertEqual(fingerprint(first), fingerprint(first))
+
+    def test_opaque_fingerprint_is_inconclusive(self):
+        from fingerprints import fingerprint
+        with self.assertRaises(TypeError):
+            fingerprint({'opaque': object()})
+
+    def test_infinite_plan_limits_are_representable(self):
+        from fingerprints import fingerprint
+        self.assertNotEqual(fingerprint(float('inf')), fingerprint(float('-inf')))
+        with self.assertRaises(TypeError):
+            fingerprint(float('nan'))
+
+    def test_mutation_recipe_with_two_edits_emits_one_file_patch(self):
+        from tools.generalization import CASES, generate
+        from hybrid import apply_patch
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'toy.py'
+            path.write_bytes(b'a = 0\nb = 0\n')
+            try:
+                CASES['test_recipe'] = ('code', 'dev',
+                                        [('toy.py', 'a = 0', 'a = 1'), ('toy.py', 'b = 0', 'b = 2')])
+                patch, changed = generate('test_recipe', Path(tmp))
+                self.assertEqual(apply_patch(patch.decode(), {'toy.py': 'a = 0\nb = 0\n'}),
+                                 {'toy.py': 'a = 1\nb = 2\n'})
+            finally:
+                CASES.pop('test_recipe', None)
