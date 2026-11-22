@@ -36,13 +36,16 @@ def schedule(tests: list[dict]) -> list[list[int]]:
     return best
 
 
-def main() -> None:
+def main(refine=None) -> None:
     tests = json.loads((DATA / 'tests.json').read_text(encoding='utf-8'))['tests']
     workers = schedule(tests)
     evidence = load(tests)
     for patch in sorted((DATA / 'commits').glob('*.patch')):
         try:
-            ids, reason = decide(patch.read_bytes().decode('utf-8'), evidence)
+            diff = patch.read_bytes().decode('utf-8')
+            ids, reason = decide(diff, evidence)
+            if refine is not None:
+                ids = refine(diff, ids, tests, evidence, reason)
         except (UnicodeError, OSError, RecursionError):
             ids, reason = None, 'unreadable_patch'
         selected = workers if ids is None else schedule([t for t in tests if t['id'] in ids])

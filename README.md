@@ -72,3 +72,21 @@ observations in both orders, then build the deterministic metadata file.
 ## Submission
 
 Use the public repository https://github.com/bob-the-doorknob/plingplong and the full validated commit SHA at the [official track](https://www.joinbuilders.org/buildathon/tracks/blast-radius). The accepted all-tests revision is `205133366ef9ed2be41a56ac606a51b5d5ac6d5e`.
+
+### Phase 14 experimental pipeline
+
+The default image still uses the coverage selector and LPT. To build the
+separate locked Linux/amd64 verification image and measure the strategies,
+run the following with the labeled holdout patches under .phase5/generalization.
+
+    docker build --platform linux/amd64 --target verifier -t phase14-experiment .
+    python tools/bench_verifier.py phase14-experiment holdout --mode cheap
+    python tools/bench_verifier.py phase14-experiment holdout --mode import
+    python tools/bench_verifier.py phase14-experiment holdout --mode tpc
+    python tools/bench_verifier.py phase14-experiment holdout --mode cheap,import,tpc
+
+Use --mode cheap,calibrate to measure counterfactual isolation exclusions
+without the cost gate. Those outputs are experimental. A passing isolated
+test is insufficient release evidence. The bench runner mounts only patches
+and the organizer catalog into Docker. It scores against the labels on the
+host and reports determinism, resources and missed commits.

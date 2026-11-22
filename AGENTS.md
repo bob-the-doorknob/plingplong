@@ -60,3 +60,7 @@
   Test-side narrowing requires the terminal literal and two-order operand
   evidence. Retain raw readers and uncertain tests. Re-run validation and
   the frozen holdout before changing either rule.
+- The optional verifier image is for experiments. Preserve the default
+  selector unless full-suite ordering, deterministic outputs and total
+  measured cost justify changing it. Import and TPC projections do not
+  authorize exclusion on their own.

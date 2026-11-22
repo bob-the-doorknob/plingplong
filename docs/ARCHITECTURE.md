@@ -87,3 +87,25 @@ orders. The packer rejects observed source readers and statically
 referenced test modules and methods. Runtime retains source readers and
 uncertain tests. Finite tracing and static reference checks still have
 limits for indirect reflection, cross-test state and child processes.
+
+## Phase 14 verification experiments
+
+The optional Docker target installs organizer-locked dependencies and checks
+the SHA-256 of the pinned SQLGlot archive. Each job builds a temporary view
+with symlinked unchanged files and actual bytes for changed files. The child
+uses fresh imports and a bounded process group, output file and address
+space. The parent retains unreported, skipped, failed and protected tests.
+The experimental planner compares the maximum possible LPT savings with a
+startup and execution CPU estimate before starting a job.
+
+The experimental entry point receives the original candidates and reason.
+For structural Python edits, it compares import projections first. A
+confirmed import failure widens to the full suite. Other comparisons retain
+the static candidates. It then prices cheap tests and, when enabled, probes
+at most one patch with selected TPC tests. The handoff probe traces each
+query, includes parent parsing of unexecuted queries, and compares graph
+aliases, plans and reference SQL. Projection equality does not authorize
+removal of TPC tests or imply that downstream execution is unchanged.
+
+The default Docker target inherits the original standard-library selector.
+The optional image and the ablation commands are for development.
