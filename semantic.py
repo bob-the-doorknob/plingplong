@@ -1,5 +1,6 @@
 """Experimental AST change locality; text observability always remains separate."""
 import ast
+import difflib
 
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 # Comprehensions and generator expressions are left inside their enclosing
@@ -122,7 +123,64 @@ def _boolean_schema_edit(before, after):
     return [key.value for key in first.value.keys] == [key.value for key in second.value.keys]
 
 
-def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
+def _dotted(node):
+    """Dotted names (and their prefixes) loaded anywhere in node."""
+    names = set()
+    for sub in ast.walk(node):
+        parts = []
+        while isinstance(sub, ast.Attribute):
+            parts.append(sub.attr)
+            sub = sub.value
+        if isinstance(sub, ast.Name):
+            chain = [sub.id] + parts[::-1]
+            names.update('.'.join(chain[:i]) for i in range(1, len(chain) + 1))
+    return names
+
+
+def _blank_constants(node):
+    copy = ast.parse(ast.unparse(node))
+    for sub in ast.walk(copy):
+        if isinstance(sub, ast.Constant):
+            sub.value = None
+    return ast.dump(copy)
+
+
+MUTATORS_BY_TYPE = {ast.Dict: {'setdefault', 'update'}, ast.Set: {'add', 'discard', 'update'},
+                    ast.List: {'append', 'extend'}}
+
+
+def _non_raising_call(a, b, container):
+    """Both calls use a mutator of the bound literal container type with literal arguments."""
+    call = b.value
+    method = call.func.attr
+    allowed = MUTATORS_BY_TYPE.get(type(container), set())
+    safe = method in allowed or (isinstance(container, ast.Dict) and method == 'pop'
+                                 and len(call.args) == 2 and not call.keywords)
+    literal = all(_literal(arg) for arg in call.args) and all(_literal(k.value) for k in call.keywords)
+    return safe and literal and _blank_constants(a) == _blank_constants(b)
+
+
+def _mutating_call(node):
+    """(name, method) of a class-body statement NAME.method(...), else None."""
+    if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute) and isinstance(node.value.func.value, ast.Name)
+            and not node.value.func.value.id.startswith('__')):
+        return node.value.func.value.id, node.value.func.attr
+    return None
+
+
+def without_docstrings(source):
+    """AST dump with the text of every existing docstring blanked, or None."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+                first.value.value = ''
+    return ast.dump(tree)
+
+
+def _class_attribute_changes(old_body, new_body, prefix='', in_class=False, known=None):
     if len(old_body) != len(new_body):
         return None
     changes = []
@@ -133,12 +191,20 @@ def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
                 ast.dump(ast.Tuple(elts=getattr(a, f, []), ctx=ast.Load()))
                 == ast.dump(ast.Tuple(elts=getattr(b, f, []), ctx=ast.Load()))
                 for f in ('bases', 'keywords', 'decorator_list', 'type_params')):
-            inner = _class_attribute_changes(a.body, b.body, prefix + a.name + '.', True)
+            inner = _class_attribute_changes(a.body, b.body, prefix + a.name + '.', True, known)
             if inner is None:
                 return None
             if len(inner) == 1 and _boolean_schema_edit(a, b):
                 inner[0]['boolean_schema'] = True
             changes.extend(inner)
+            continue
+        mutated = _mutating_call(a) if in_class else None
+        if mutated and mutated == _mutating_call(b) and _bindings(old_body, mutated[0]) == 1 \
+                and _bindings(new_body, mutated[0]) == 1 and any(
+                    _assigned_name(st) == mutated[0] for st in old_body) and _non_raising_call(
+                    a, b, next(st.value for st in old_body if _assigned_name(st) == mutated[0])):
+            # A class-body call such as KEYWORDS.pop("X") changes the value of that attribute.
+            changes.append(dict(cls=prefix[:-1], attr=mutated[0], body_read=True))
             continue
         name = _assigned_name(a) if in_class else None
         if (not name or name.startswith('__') or name != _assigned_name(b)
@@ -149,9 +215,111 @@ def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
         kind = _literal_kind(a.value)
         if kind is not None and _literal_kind(b.value) is not kind:
             return None
+        # A name the pinned file never resolved may raise while the class body runs.
+        if kind is None and known is not None and not _dotted(b.value) - _dotted(a.value) <= known:
+            return None
         changes.append(dict(cls=prefix[:-1], attr=name,
                             body_read=_body_reads(old_body, name) or _body_reads(new_body, name)))
     return changes
+
+
+SAFE_DECORATORS = frozenset({'staticmethod', 'classmethod', 'property'})
+
+
+def _literal(node):
+    try:
+        ast.literal_eval(node)
+        return True
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+
+
+def _annotations(node):
+    arguments = node.args
+    return [ast.dump(arg.annotation) if arg.annotation else None
+            for arg in arguments.posonlyargs + arguments.args + arguments.kwonlyargs
+            + [a for a in (arguments.vararg, arguments.kwarg) if a]] + [ast.dump(node.returns) if node.returns else None]
+
+
+def _header_change(a, b, postponed):
+    """True when two same-name definitions differ only in safely evaluated header parts."""
+    if (type(a) is not type(b) or a.name != b.name or ast.dump(ast.Module(body=a.body, type_ignores=[]))
+            != ast.dump(ast.Module(body=b.body, type_ignores=[]))
+            or [ast.dump(d) for d in a.decorator_list] != [ast.dump(d) for d in b.decorator_list]
+            or getattr(a, 'type_params', None) or getattr(b, 'type_params', None)):
+        return False
+    # Without postponed evaluation an annotation runs when the definition runs.
+    if not postponed and _annotations(a) != _annotations(b):
+        return False
+    old_defaults = {ast.dump(d) for d in a.args.defaults + a.args.kw_defaults if d is not None}
+    # A new default is evaluated when the definition runs; only literals cannot raise.
+    return all(_literal(d) for d in b.args.defaults + b.args.kw_defaults
+               if d is not None and ast.dump(d) not in old_defaults)
+
+
+def _new_member(node, postponed):
+    """A method whose definition can be added or removed without import-time effects."""
+    if not isinstance(node, FUNCTIONS) or node.name.startswith('__') or getattr(node, 'type_params', None):
+        return False
+    arguments = node.args
+    annotated = node.returns is not None or any(
+        arg.annotation is not None for arg in arguments.posonlyargs + arguments.args + arguments.kwonlyargs
+        + [a for a in (arguments.vararg, arguments.kwarg) if a])
+    if not (postponed or not annotated) or not all(
+            _literal(d) for d in arguments.defaults + arguments.kw_defaults if d is not None):
+        return False
+    # Other decorators run at class creation; the caller must prove them pure.
+    return tuple(ast.unparse(d) for d in node.decorator_list
+                 if not (isinstance(d, ast.Name) and d.id in SAFE_DECORATORS))
+
+
+def _member_changes(old_body, new_body, postponed, prefix='', in_class=False):
+    """Header edits of existing definitions and method additions or removals, else None.
+
+    Every other statement must be identical. Records are ('header', qualname)
+    or ('member', class qualname, method name).
+    """
+    a, b = [ast.dump(s) for s in old_body], [ast.dump(s) for s in new_body]
+    changes = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag == 'equal':
+            continue
+        olds = {getattr(s, 'name', None): s for s in old_body[i1:i2]}
+        news = {getattr(s, 'name', None): s for s in new_body[j1:j2]}
+        if None in olds or None in news or len(olds) != i2 - i1 or len(news) != j2 - j1:
+            return None
+        for name in olds.keys() | news.keys():
+            x, y = olds.get(name), news.get(name)
+            if x is not None and y is not None:
+                if isinstance(x, ast.ClassDef) and isinstance(y, ast.ClassDef) and all(
+                        ast.dump(ast.Tuple(elts=getattr(x, f, []), ctx=ast.Load()))
+                        == ast.dump(ast.Tuple(elts=getattr(y, f, []), ctx=ast.Load()))
+                        for f in ('bases', 'keywords', 'decorator_list', 'type_params')):
+                    inner = _member_changes(x.body, y.body, postponed, prefix + name + '.', True)
+                    if inner is None:
+                        return None
+                    changes.extend(inner)
+                elif isinstance(x, FUNCTIONS) and _header_change(x, y, postponed):
+                    changes.append(('header', prefix + name))
+                elif (in_class and (before := _new_member(x, postponed)) is not False
+                      and (after := _new_member(y, postponed)) is not False):
+                    # A redefined method changes attribute lookup on its class.
+                    changes.append(('member', prefix[:-1], name, tuple(dict.fromkeys(before + after))))
+                else:
+                    return None
+            elif in_class and (decorators := _new_member(x or y, postponed)) is not False:
+                # A removed method still named by the class body would raise at import.
+                if _body_reads(new_body, name) or _body_reads(old_body, name):
+                    return None
+                changes.append(('member', prefix[:-1], name, decorators))
+            else:
+                return None
+    return changes
+
+
+def _postponed(tree):
+    return any(isinstance(n, ast.ImportFrom) and n.module == '__future__'
+               and any(alias.name == 'annotations' for alias in n.names) for n in tree.body)
 
 
 def scope_names(source: str) -> set[str]:
@@ -176,6 +344,9 @@ def classify_change(old: str, new: str) -> dict:
     result['ast_equal'] = ast.dump(before) == ast.dump(after)
 
     previous, old_structure, old_duplicate, old_parents = _split(before)
+    # Names the pinned module evaluated at import: module and class scope only, since
+    # _split replaced every function and lambda body with a placeholder.
+    known = _dotted(before)
     current, new_structure, new_duplicate, new_parents = _split(after)
     changed = {name for name in previous.keys() | current.keys()
                if previous.get(name) != current.get(name)}
@@ -191,16 +362,22 @@ def classify_change(old: str, new: str) -> dict:
     structural = old_structure != new_structure
     # Structural edits explained entirely by class-level assignment values, with
     # unchanged names, bases, keywords, decorators and statements elsewhere.
-    attributes = _class_attribute_changes(before.body, after.body) if structural else None
+    attributes = _class_attribute_changes(before.body, after.body, known=known) if structural else None
     if attributes and any(ambiguous(change['cls']) for change in attributes):
         attributes = None
+    members = None
+    if structural and not attributes and _postponed(before) == _postponed(after):
+        members = _member_changes(before.body, after.body, _postponed(before)) or None
+        if members and any(ambiguous(change[1]) for change in members):
+            members = None
     if any(ambiguous(name) for name in result['functions']) or (
-            duplicates and not result['functions'] and not attributes):
+            duplicates and not result['functions'] and not attributes and not members):
         result['reason'] = 'duplicate_scope'
         return result
     result['structural'] = structural
     result['reason'] = 'structural' if structural else 'bodies_or_text'
     result['class_attributes'] = attributes or None
+    result['members'] = members
     return result
 
 

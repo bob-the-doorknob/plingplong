@@ -1,5 +1,8 @@
 """Patch reconstruction and selection against the pinned, read-only evidence."""
+import ast
 import base64
+import dis
+import inspect
 import difflib
 import gzip
 import hashlib
@@ -9,7 +12,7 @@ import zlib
 from pathlib import Path
 
 from impact import changed_files, git_diff_text
-from semantic import classify_change, literal_generator_override, statement_spans
+from semantic import without_docstrings, classify_change, literal_generator_override, statement_spans
 from predicate import comparison_swap
 from structural import literal_binding, terminal_assertion
 from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
@@ -169,7 +172,9 @@ def holders(cls, attr, body_read, evidence, stable_registry_key=False):
         for key, consumers in imports.get(current, ()):
             # Expr.__init_subclass__ sets key from the class name and derives required_args
             # separately. EXPR_CLASSES still registers the same class under the same key.
-            if stable_registry_key and key == cls + '@key':
+            # Expr.__init_subclass__ derives key from the class name alone, so an arg_types
+            # edit cannot change any registry key built from it at module level.
+            if stable_registry_key and key.endswith('@key') and key.startswith('sqlglot/expressions/'):
                 pending.extend(consumer for consumer in consumers if consumer != '<module>')
             else:
                 pending.extend(consumers)
@@ -202,9 +207,8 @@ def class_attribute_tests(data, path, changes, isolated=False):
         if (change['body_read'] or written or attr in evidence['I'] or generic in evidence['I']
                 or attr in evidence['K'] or generic in evidence['K']):
             stable_registry_key = (
-                isolated and change.get('boolean_schema') and path.startswith('sqlglot/expressions/')
-                and evidence['M'][cls] == ['sqlglot/expressions/core.py::Expression']
-                and not children.get(cls)
+                change['attr'] == 'arg_types' and path.startswith('sqlglot/expressions/') and not is_core(path)
+                and not change['body_read']
             )
             found = holders(cls, change['attr'], change['body_read'], evidence, stable_registry_key)
             if found is None:
@@ -222,6 +226,445 @@ def class_attribute_tests(data, path, changes, isolated=False):
                 return None, 'unobserved_attribute'
             chosen |= readers
     return chosen, 'observed'
+
+
+def holder_receivers(data, found, evidence):
+    children = class_index(evidence)[0]
+    chosen = set()
+    for holder in found:
+        if holder.startswith('tests/'):
+            prefix = holder + '::'
+            chosen.update(i for i, name in enumerate(data['ids']) if name.startswith(prefix))
+            continue
+        for member in family(holder, children):
+            chosen |= tests_of(evidence['R'].get(member))
+    return chosen
+
+
+HARMLESS_CALLS = frozenset({'isinstance', 'issubclass', 'len', 'dict', 'list', 'tuple', 'set', 'frozenset',
+                            'str', 'sorted', 'getattr', 'hasattr', 'callable'})
+
+
+def module_path(path, module, level, sources):
+    if level:
+        parts = path.split('/')[:-level]
+        module = '.'.join(parts + ([module] if module else []))
+    for candidate in (module.replace('.', '/') + '.py', module.replace('.', '/') + '/__init__.py'):
+        if candidate in sources:
+            return candidate
+    return None
+
+
+_TREES = {}
+
+
+def parsed(path, sources):
+    """Parse a pinned module once per process."""
+    text = sources[path]
+    key = (path, hash(text))
+    tree = _TREES.get(key)
+    if tree is None:
+        tree = _TREES[key] = ast.parse(text)
+    return tree
+
+
+def resolve_function(path, node, sources):
+    """The pinned top-level FunctionDef named by a Name or module attribute, and its module."""
+    tree = parsed(path, sources)
+    if isinstance(node, ast.Name):
+        for statement in tree.body:
+            if isinstance(statement, ast.FunctionDef) and statement.name == node.id:
+                return statement, path
+            if isinstance(statement, ast.ImportFrom):
+                for alias in statement.names:
+                    if (alias.asname or alias.name) == node.id:
+                        target = module_path(path, statement.module or '', statement.level, sources)
+                        return (resolve_function(target, ast.Name(id=alias.name), sources)
+                                if target else (None, None))
+    elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        for statement in tree.body:
+            if isinstance(statement, ast.ImportFrom) and not statement.level:
+                for alias in statement.names:
+                    if (alias.asname or alias.name) == node.value.id:
+                        target = module_path(path, f'{statement.module}.{alias.name}', 0, sources)
+                        return resolve_function(target, ast.Name(id=node.attr), sources) if target else (None, None)
+            if isinstance(statement, ast.Import):
+                for alias in statement.names:
+                    if alias.asname == node.value.id or (not alias.asname and alias.name == node.value.id):
+                        target = module_path(path, alias.name, 0, sources)
+                        return resolve_function(target, ast.Name(id=node.attr), sources) if target else (None, None)
+    return None, None
+
+
+def pure_decorator(path, text, sources):
+    """True for a decorator whose application can only build and return local functions."""
+    node = ast.parse(text, mode='eval').body
+    if isinstance(node, ast.Call):
+        if node.keywords or any(isinstance(a, ast.Starred) for a in node.args) or not all(
+                _literal_node(a) for a in node.args):
+            return False
+        node = node.func
+    function, where = resolve_function(path, node, sources)
+    if function is None:
+        return False
+    wraps_imported = any(isinstance(n, ast.ImportFrom) and n.module == 'functools'
+                         and any(a.name == 'wraps' and not a.asname for a in n.names)
+                         for n in parsed(where, sources).body)
+    local = set()
+    for sub in ast.walk(function):
+        if isinstance(sub, (ast.Global, ast.Nonlocal, ast.ClassDef, ast.Import, ast.ImportFrom, ast.Delete,
+                            ast.Yield, ast.YieldFrom, ast.Await, ast.Lambda)):
+            return False
+        if isinstance(sub, ast.arg):
+            local.add(sub.arg)
+        elif isinstance(sub, ast.Name) and not isinstance(sub.ctx, ast.Load):
+            local.add(sub.id)
+        elif isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            local.add(sub.name)
+
+    def root(target):
+        while isinstance(target, (ast.Attribute, ast.Subscript, ast.Starred)):
+            target = target.value
+        return target.id if isinstance(target, ast.Name) else None
+
+    for sub in ast.walk(function):
+        targets = (sub.targets if isinstance(sub, ast.Assign) else [sub.target]
+                   if isinstance(sub, (ast.AugAssign, ast.AnnAssign, ast.For, ast.comprehension)) else [])
+        for target in targets:
+            for name in (t for t in ast.walk(target) if isinstance(t, (ast.Attribute, ast.Subscript))):
+                if root(name) not in local:
+                    return False
+        if isinstance(sub, ast.Call):
+            callee = sub.func
+            if isinstance(callee, ast.Name):
+                if not (callee.id in local or callee.id in HARMLESS_CALLS or (callee.id == 'wraps' and wraps_imported)):
+                    return False
+            elif root(callee) not in local:
+                return False
+    return True
+
+
+def _literal_node(node):
+    try:
+        ast.literal_eval(node)
+        return True
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+
+
+GLOBAL_LOADS = frozenset({'LOAD_GLOBAL', 'LOAD_NAME', 'LOAD_FROM_DICT_OR_GLOBALS', 'STORE_GLOBAL', 'DELETE_GLOBAL',
+                          'STORE_NAME', 'DELETE_NAME'})
+
+
+def _bindings_of(statement):
+    """Name -> binding signature of a top-level literal assignment or from-import."""
+    if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name) and _literal_node(statement.value)):
+        return {statement.targets[0].id: ('literal', type(ast.literal_eval(statement.value)).__name__)}
+    if isinstance(statement, ast.ImportFrom) and statement.names and all(a.name != '*' for a in statement.names):
+        return {a.asname or a.name: ('import', statement.module, statement.level, a.name) for a in statement.names}
+    return None
+
+
+def _reflects_namespace(tree):
+    """True when a module can read or write its own globals by computed name."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in ('globals', 'locals', 'exec', 'eval', '__import__') or (
+                    node.func.id == 'vars' and not node.args):
+                return True
+        if isinstance(node, ast.Attribute) and node.attr == 'modules' and isinstance(node.value, ast.Name) \
+                and node.value.id == 'sys':
+            return True
+        if isinstance(node, ast.Name) and node.id == '__dict__':
+            return True
+    return False
+
+
+def module_binding_tests(data, path, old, new):
+    """Tests reaching functions that load changed top-level bindings of a module, or None.
+
+    Supported edits change literal assignment values (same type) or the names a
+    from-import binds, with the same source modules. Readers come from pinned
+    bytecode; an import-time or class-body read, a rebinding, namespace reflection
+    or any other module importing or attribute-reading the name falls back.
+    """
+    sources = data['sources']
+    before, after = ast.parse(old), ast.parse(new)
+    if len(before.body) != len(after.body):
+        return None
+    changed = set()
+    for a, b in zip(before.body, after.body):
+        if ast.dump(a) == ast.dump(b):
+            continue
+        x, y = _bindings_of(a), _bindings_of(b)
+        if x is None or y is None or type(a) is not type(b):
+            return None
+        if isinstance(a, ast.ImportFrom):
+            if (a.module, a.level) != (b.module, b.level):
+                return None
+            target = module_path(path, a.module or '', a.level, sources)
+            if target is None or is_core(target):
+                return None
+            defined = {n for st in parsed(target, sources).body for n in (
+                [st.name] if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                else [t.id for t in getattr(st, 'targets', []) if isinstance(t, ast.Name)]
+                + [al.asname or al.name for al in getattr(st, 'names', []) if isinstance(st, (ast.Import, ast.ImportFrom))])}
+            if any(entry[3] not in defined for entry in y.values()):
+                return None
+        elif x.keys() != y.keys() or x != y:
+            return None
+        changed |= {name for name in x.keys() | y.keys() if x.get(name) != y.get(name) or isinstance(a, ast.Assign)}
+    if not changed:
+        return None
+    if _reflects_namespace(before):
+        return None
+    for name in changed:
+        if sum(name in (_bindings_of(st) or {}) or getattr(st, 'name', None) == name for st in before.body) != 1:
+            return None
+    readers = _binding_readers(path, old, changed)
+    if readers is None:
+        return None
+    hits = data['hits']
+    chosen = set()
+    observed = [path + '::' + reader for reader in readers]
+    # Other modules: follow imported copies and module attribute reads one level.
+    tokens = re.compile(r'\b(' + '|'.join(map(re.escape, sorted(changed))) + r')\b')
+    tests = data.get('test_evidence', {})
+    others = dict(sources) | tests.get('sources', {})
+    ids = data['ids']
+    for other, text in others.items():
+        if other == path or not other.endswith('.py') or not (tokens.search(text) or 'import *' in text):
+            continue
+        copies, attributes = _imports_of(other, parsed(other, others), path, changed, others)
+        if copies is None:
+            return None
+        if not copies and not attributes:
+            continue
+        if other.startswith('tests/'):
+            if other.rsplit('/', 1)[-1] in ('conftest.py', '__init__.py'):
+                return None
+            files = {other} | set(tests.get('importers', {}).get(other, ()))
+            chosen.update(i for i, name in enumerate(ids) if name.split('::')[0] in files)
+            continue
+        if is_core(other) or other not in sources:
+            return None
+        found = _binding_readers(other, text, copies, attributes)
+        if found is None:
+            return None
+        observed.extend(other + '::' + reader for reader in found)
+        chosen.update(hits.get(other + '::@importers', ()))
+        # A further copy of the alias would need another level; fall back instead.
+        for alias in copies:
+            if any(alias in t and o not in (other, path) and re.search(r'\b' + re.escape(alias) + r'\b', t)
+                   and _imports_of(o, parsed(o, others), other, {alias}, others) != (set(), set())
+                   for o, t in others.items() if o.endswith('.py')):
+                return None
+    # Unread or unobserved readers keep the conservative fallback.
+    if not observed or not all(hits.get(key) for key in observed):
+        return None
+    for key in observed:
+        chosen.update(hits[key])
+    return chosen
+
+
+def _imports_of(file, tree, path, names, sources):
+    """Local aliases of names imported from path, and local names bound to path's module.
+
+    Returns (None, None) for a star import or a reflective use of the module.
+    """
+    copies, modules = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            target = module_path(file, node.module or '', node.level, sources)
+            for alias in node.names:
+                if target == path and alias.name == '*':
+                    return None, None
+                if target == path and alias.name in names:
+                    copies.add(alias.asname or alias.name)
+                if module_path(file, f'{node.module}.{alias.name}' if node.module else alias.name,
+                               node.level, sources) == path:
+                    modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if module_path(file, alias.name, 0, sources) == path:
+                    modules.add(alias.asname or alias.name.split('.')[0])
+    attributes = set()
+    if modules:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in names:
+                attributes.add(node.attr)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in (
+                    'getattr', 'vars', 'setattr', 'dir') and any(
+                    isinstance(arg, ast.Name) and arg.id in modules for arg in node.args):
+                return None, None
+    return copies, attributes
+
+
+def _binding_readers(path, source, names, attributes=()):
+    """Qualified names of runtime code objects reading names, or None for import-time reads."""
+    readers = set()
+    code_objects = [compile(source, path, 'exec', dont_inherit=True)]
+    while code_objects:
+        code = code_objects.pop()
+        code_objects.extend(c for c in code.co_consts if hasattr(c, 'co_code'))
+        instructions = list(dis.get_instructions(code))
+        top = code.co_qualname == '<module>'
+        reads = any((i.opname in GLOBAL_LOADS and i.argval in names and not i.opname.startswith(('STORE', 'DELETE')))
+                    or (i.opname == 'IMPORT_FROM' and i.argval in names and not top)
+                    or (i.opname in ('LOAD_ATTR', 'LOAD_METHOD') and i.argval in attributes)
+                    for i in instructions)
+        if not reads:
+            continue
+        # Module and class bodies run at import; their reads may persist in derived state.
+        if top or not code.co_flags & inspect.CO_OPTIMIZED:
+            return None
+        if any(i.opname in ('STORE_GLOBAL', 'DELETE_GLOBAL') and i.argval in names for i in instructions):
+            return None
+        readers.add(code.co_qualname)
+    return readers
+
+
+def member_tests(data, path, members):
+    """Tests reaching changed definition headers or a class that gains or loses a method.
+
+    A header edit of an existing function (literal defaults, unchanged
+    decorators) is observed only through calls of that code object. An added
+    or removed method changes attribute lookup on its class, so every test
+    that touched the class, a subclass or a holder of its import-time state
+    is selected; a module-level import read falls back.
+    """
+    hits, evidence = data['hits'], data.get('classes')
+    chosen = set()
+    for record in members:
+        if record[0] == 'header':
+            key = path + '::' + record[1]
+            if not hits.get(key):
+                return None, 'unobserved_scope'
+            chosen.update(hits[key])
+            continue
+        if is_core(path) or not evidence:
+            return None, 'structural_or_text'
+        cls = path + '::' + record[1]
+        if cls not in evidence['M'] or cls not in evidence['R']:
+            return None, 'unobserved_class'
+        if not all(pure_decorator(path, text, data['sources']) for text in record[3]):
+            return None, 'structural_or_text'
+        children = class_index(evidence)[0]
+        if any(k + '@' + record[2] in evidence['W'] for k in family(cls, children)):
+            return None, 'class_write'
+        # Import-time reads through this class were attributed to the ancestor that
+        # supplied the name before the edit.
+        ancestors, pending = set(), list(evidence['M'][cls])
+        while pending:
+            current = pending.pop()
+            if current not in ancestors:
+                ancestors.add(current)
+                pending.extend(evidence['M'].get(current, ()))
+        consumers = {c for a in ancestors for c in evidence['I'].get(a + '@' + record[2], ())}
+        if '<module>' in consumers:
+            return None, 'import_module_read'
+        found = holders(cls, record[2], True, evidence)
+        for consumer in consumers:
+            extra = holders(consumer, '', True, evidence) if found is not None else None
+            found = None if extra is None else found | extra
+        if found is None:
+            return None, 'import_module_read'
+        chosen |= holder_receivers(data, found, evidence)
+    return chosen, 'structure'
+
+
+MUTATORS = frozenset({'append', 'extend', 'insert', 'pop', 'popitem', 'remove', 'clear', 'update',
+                      'setdefault', 'add', 'discard', 'sort', 'reverse', '__setitem__', '__delitem__'})
+
+
+def _outside_functions(node):
+    """Nodes executed by node itself, without descending into nested function bodies."""
+    pending = [node]
+    while pending:
+        current = pending.pop()
+        yield current
+        for child in ast.iter_child_nodes(current):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                pending.extend(child.decorator_list + child.args.defaults + [d for d in child.args.kw_defaults if d])
+            elif not isinstance(child, ast.Lambda):
+                pending.append(child)
+
+
+def writes_shared_state(nodes):
+    """True when code may change state that outlives its own frame or test instance."""
+    for node in nodes:
+        local = {a.arg for a in ast.walk(node) if isinstance(a, ast.arg)} | {
+            n.id for n in ast.walk(node) if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load)}
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            local = set()
+
+        def root(target):
+            while isinstance(target, (ast.Attribute, ast.Subscript, ast.Starred)):
+                target = target.value
+            return target.id if isinstance(target, ast.Name) else None
+
+        for sub in (ast.walk(node) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else _outside_functions(node)):
+            if isinstance(sub, (ast.Global, ast.Nonlocal)):
+                return True
+            targets = (sub.targets if isinstance(sub, (ast.Assign, ast.Delete)) else [sub.target]
+                       if isinstance(sub, (ast.AugAssign, ast.AnnAssign)) else [])
+            for target in targets:
+                for part in ast.walk(target):
+                    if isinstance(part, (ast.Attribute, ast.Subscript)) and root(part) not in local:
+                        return True
+            if isinstance(sub, ast.Call):
+                callee = sub.func
+                if isinstance(callee, ast.Name) and callee.id in ('setattr', 'delattr', 'exec', 'eval', '__import__'):
+                    return True
+                if isinstance(callee, ast.Attribute) and callee.attr in MUTATORS and root(callee) not in local:
+                    return True
+    return False
+
+
+def test_module_tests(data, path, original, new):
+    """Tests that may observe an edit of a pinned test module, or None with a reason.
+
+    Collection-wide files fall back. A module edit selects its own tests and every
+    test module that imports it; an edit confined to test method bodies selects
+    those tests (including inherited copies in the same module) plus importers.
+    New code that writes non-local state could leak into later tests and falls back.
+    """
+    if path.rsplit('/', 1)[-1] in ('conftest.py', '__init__.py'):
+        return None, 'test_structure'
+    importers = set(data['test_evidence']['importers'].get(path, ()))
+    ids = data['ids']
+    own = {i for i, name in enumerate(ids) if name.startswith(path + '::')}
+    imported = {i for i, name in enumerate(ids) if name.split('::')[0] in importers}
+    try:
+        compile(new, path, 'exec', dont_inherit=True)
+        change = classify_change(original, new)
+        before, after = ast.parse(original), ast.parse(new)
+    except (SyntaxError, ValueError, RecursionError):
+        # The module and its importers fail to import, which fails exactly their tests.
+        return own | imported, 'test_module'
+    if change['ast_equal']:
+        return set(), 'comment_only'
+    old_nodes = {ast.dump(n) for n in ast.walk(before) if isinstance(n, ast.stmt)}
+    changed = [n for n in ast.walk(after) if isinstance(n, ast.stmt) and ast.dump(n) not in old_nodes]
+    functions = [n for n in ast.walk(after) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                 and any(c in set(ast.walk(n)) for c in changed)]
+    if writes_shared_state([n for n in changed if not any(n in set(ast.walk(f)) for f in functions)] + functions):
+        return None, 'test_state'
+    if not own:
+        return imported, 'test_module'
+    if change['structural'] or not change['functions']:
+        return own | imported, 'test_module'
+    targets = set()
+    for qualname in change['functions']:
+        method = qualname.split('.')[-1]
+        loads = sum(isinstance(n, (ast.Attribute, ast.Name)) and getattr(n, 'attr', getattr(n, 'id', None)) == method
+                    for tree in (before, after) for n in ast.walk(tree))
+        matches = {i for i in own if ids[i].endswith('::' + method)}
+        if loads or not method.startswith('test') or '<locals>' in qualname or not matches:
+            return own | imported, 'test_module'
+        targets |= matches
+    return targets | imported, 'test_method'
 
 
 def configuration_members(evidence, cls, base, attr, allow_dialect_import=False):
@@ -313,7 +756,7 @@ def load(tests):
         if data['schema'] == 1 and data['pin'] == PIN and sorted(t['id'] for t in tests) == data['ids']:
             digest = hashlib.sha256(base).hexdigest()
             for filename, key in (('lines.gz', 'line_evidence'), ('predicates.gz', 'predicate_evidence'),
-                                  ('structural.gz', 'structural_evidence')):
+                                  ('structural.gz', 'structural_evidence'), ('tests.gz', 'test_evidence')):
                 try:
                     auxiliary = json.loads(gzip.decompress(Path(__file__).with_name(filename).read_bytes()))
                     if (auxiliary['version'] == 1 and auxiliary['pin'] == PIN and auxiliary['ids'] == data['ids']
@@ -374,6 +817,9 @@ def decide(diff, data, mode='scope'):
     test_sources = structural.get('tests', {})
     if mode == 'scope' and test_sources:
         sources = sources | {path: record['source'] for path, record in test_sources.items()}
+    modules = data.get('test_evidence', {}).get('sources', {}) if mode == 'scope' else {}
+    if modules:
+        sources = modules | sources
     try:
         updates = apply_patch(diff, sources)
     except (ValueError, IndexError):
@@ -393,10 +839,9 @@ def decide(diff, data, mode='scope'):
         readers = hits.get(path, [])
         chosen.update(readers)
         if path.startswith('tests/fixtures/') and path.endswith('.sql'):
+            # Fixture text, comments and metadata lines included, is observable only by
+            # opening the file; shared or missing readers still fall back below.
             code_changed = True
-            if touches_block_comment(data['sources'][path], new) or (
-                    sql_without_comments(data['sources'][path]) == sql_without_comments(new)):
-                return None, 'fixture_text'
             if not readers:
                 return None, 'unobserved_fixture'
         elif path in test_sources:
@@ -405,16 +850,32 @@ def decide(diff, data, mode='scope'):
                 edit = terminal_assertion(original, new) if len(updates) == 1 else None
             except (SyntaxError, ValueError, RecursionError):
                 edit = None
-            if not edit or test_sources[path]['assertions'].get(edit[0]) != list(edit[1:]):
-                return None, 'test_structure'
-            candidate = path + '::' + edit[0]
-            if candidate not in data['ids']:
-                return None, 'test_structure'
+            candidate = path + '::' + edit[0] if edit else None
+            if (not edit or test_sources[path]['assertions'].get(edit[0]) != list(edit[1:])
+                    or candidate not in data['ids']):
+                if path not in modules:
+                    return None, 'test_structure'
+                found, reason = test_module_tests(data, path, original, new)
+                if found is None:
+                    return None, reason
+                chosen.update(found)
+                chosen.update(data.get('line_evidence', {}).get('extra', ()))
+                configuration_reason = configuration_reason or reason
+                code_changed = True
+                continue
             chosen.update(hits.get('!untraced', ()))
             chosen.update(data.get('line_evidence', {}).get('extra', ()))
             if -1 in chosen:
                 return None, 'shared_or_missing'
             return {candidate} | {data['ids'][i] for i in chosen}, 'test_assertion'
+        elif path in modules:
+            found, reason = test_module_tests(data, path, modules[path], new)
+            if found is None:
+                return None, reason
+            chosen.update(found)
+            chosen.update(data.get('line_evidence', {}).get('extra', ()))
+            configuration_reason = configuration_reason or reason
+            code_changed = code_changed or reason != 'comment_only'
         elif path.startswith('sqlglot/') and path.endswith('.py'):
             original = data['sources'][path]
             # Python ends lines only at \r\n, \r or \n; str.splitlines also splits at \x0c, \x85, ...
@@ -430,7 +891,13 @@ def decide(diff, data, mode='scope'):
                 # Comment or layout only: bytecode differs at most in line numbers,
                 # so only tests that read this source as text can observe it.
                 continue
+            if (mode == 'scope' and change['structural']
+                    and without_docstrings(original) == without_docstrings(new)):
+                # Pinned sqlglot reads docstrings only to keep an Expr class's own __doc__,
+                # and no collected test reads __doc__; treat docstring text like comments.
+                continue
             code_changed = True
+            skipped = set()
             if change['structural']:
                 if mode == 'scope' and len(updates) == 1 and not is_core(path):
                     bindings = data.get('structural_evidence', {}).get('globals', {}).get(path, {})
@@ -452,11 +919,29 @@ def decide(diff, data, mode='scope'):
                         chosen.update(hits.get(path + '::@importers', ()))
                         configuration_reason = 'generator_override'
                         continue
-                if not change.get('class_attributes') or is_core(path):
+                if mode == 'scope' and not is_core(path) and not change.get('class_attributes') \
+                        and not change.get('members'):
+                    found = module_binding_tests(data, path, original, new)
+                    if found is not None:
+                        chosen.update(found)
+                        chosen.update(hits.get(path + '::@importers', ()))
+                        chosen.update(data.get('line_evidence', {}).get('extra', ()))
+                        configuration_reason = configuration_reason or 'module_binding'
+                        continue
+                members = change.get('members') if mode == 'scope' else None
+                if members and not change.get('class_attributes'):
+                    found, reason = member_tests(data, path, members)
+                    if found is None:
+                        return None, reason
+                    chosen.update(found)
+                    chosen.update(data.get('line_evidence', {}).get('extra', ()))
+                    configuration_reason = configuration_reason or 'structure'
+                    skipped = {record[1] + '.' + record[2] for record in members if record[0] == 'member'}
+                if not members and (not change.get('class_attributes') or is_core(path)):
                     return None, 'structural_or_text'
-                isolated = len(updates) == 1 and len(change['class_attributes']) == 1 and not change['functions']
-                found = None
-                if mode == 'scope' and isolated:
+                isolated = len(updates) == 1 and len(change.get('class_attributes') or ()) == 1 and not change['functions']
+                found = set() if members and not change.get('class_attributes') else None
+                if found is None and mode == 'scope' and isolated:
                     attribute = change['class_attributes'][0]
                     found = numeric_escape_tests(data, path, original, new, attribute)
                     if found is not None:
@@ -475,6 +960,8 @@ def decide(diff, data, mode='scope'):
             chosen.update(hits.get(path + '::@importers', ()))
             scopes = set()
             for name in change['functions']:
+                if any(name == m or name.startswith(m + '.') for m in skipped):
+                    continue
                 key = path + '::' + name
                 if key not in hits:
                     return None, 'unobserved_scope'

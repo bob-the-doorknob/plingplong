@@ -8,8 +8,27 @@
 - Unknown impact must conservatively select all tests. A sqlglot .py edit whose
   ast.dump is unchanged selects only its text readers (hits[path]) plus untraced
   tests, and never forces a full fallback of a multi-file patch. Shared readers,
-  failed reconstruction or coding[:=] on lines 1-2 still select all tests. SQL
-  fixture comment-only edits still select all tests.
+  failed reconstruction or coding[:=] on lines 1-2 still select all tests. Any
+  edit of an indexed SQL fixture, comments included, selects its observed readers;
+  shared or missing readers select all tests.
+- Phase 13 structure rules (non-core files unless noted): a function header edit
+  with literal new defaults and unchanged decorators selects that code object's
+  observations (core files too); an added, removed or redefined non-dunder method
+  with literal defaults and pure decorators selects receivers of the class family
+  and import-time holders, including ancestor reads of the name; a top-level
+  literal or from-import rebinding selects bytecode readers, following importing
+  modules one level; edits of non-collection test modules select their tests and
+  importer files, or only edited test methods. Import-time or <module> reads,
+  reflection, state writes, unobserved readers and class writes fall back.
+- Docstring text edits (docstrings kept) are treated like comments. A class-body
+  NAME.method(...) call edit is a change of attribute NAME (body read). Any
+  arg_types value edit of a non-core Expression class may ignore <module> reads of
+  name-derived registry keys only; other module reads fall back.
+- Import-time evaluation must not be able to raise: class-body mutators only in
+  non-raising forms (pop with default, update, setdefault, add, discard, append,
+  extend) with literal-only argument edits; new non-literal class values may not
+  introduce dotted names absent from the pinned file; a removed method may not be
+  named by its class body. An import failure fails whole test files.
 - Class-level assignment values may narrow in a
   non-core file (not parser.py, generator.py, tokens.py, dialects/dialect.py,
   expressions/core.py or any __init__.py), using traced attribute reads. Import

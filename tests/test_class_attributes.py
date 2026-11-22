@@ -173,6 +173,11 @@ class ExpressionRegistry(unittest.TestCase):
         subclass = copy.deepcopy(evidence)
         subclass['classes'].pop('_index', None)
         subclass['classes']['M'][CUSTOM] = [cls]
+        # Subclass receivers join; their own derived reads would enter the closure as consumers.
+        self.assertEqual(decide(git_patch({path: (old, new)}), subclass), (names(0, 1, 2, 3), 'observed'))
+        subclass['classes'].pop('_index', None)
+        subclass['classes']['I'][cls + '@arg_types'].append(CUSTOM)
+        subclass['classes']['I'][CUSTOM + '@required_args'] = ['<module>']
         self.assertEqual(decide(git_patch({path: (old, new)}), subclass), (None, 'import_module_read'))
 
         transitive = copy.deepcopy(evidence)
@@ -197,8 +202,9 @@ class ExpressionRegistry(unittest.TestCase):
         )
         old = 'class Example(Expression):\n    arg_types = {"this": True, "optional": False}\n'
         evidence['sources'] = {path: old}
-        for new in (old.replace('optional', 'other'), old.replace('False', '1 / 0')):
-            self.assertIsNone(decide(git_patch({path: (old, new)}), evidence)[0])
+        # Renamed argument keys reach code only through receivers of the class.
+        self.assertEqual(decide(git_patch({path: (old, old.replace('optional', 'other'))}), evidence)[0], names(0, 1))
+        self.assertIsNone(decide(git_patch({path: (old, old.replace('False', '1 / 0'))}), evidence)[0])
 
     def test_import_fallback_for_literal_replaced_with_runtime_expression(self):
         self.assertEqual(run(OLD.replace('SETTING = 1', 'SETTING = 1 / 0')),
@@ -207,3 +213,49 @@ class ExpressionRegistry(unittest.TestCase):
     def test_import_fallback_for_literal_type_change(self):
         self.assertEqual(run(OLD.replace('SETTING = 1', 'SETTING = None')),
                          (None, 'structural_or_text'))
+
+
+class MutatingCalls(unittest.TestCase):
+    def test_class_body_mutation_changes_the_attribute_value(self):
+        for old, new in [('TABLE.pop("a", None)', 'TABLE.pop("b", None)'), ('TABLE.update({"a": 1})', 'TABLE.update({"a": 2})')]:
+            source = f'class Widget(Base):\n    TABLE = {{"a": 1, "b": 2}}\n    {old}\n'
+            with self.subTest(new=new):
+                result = classify_change(source, source.replace(old, new))
+                self.assertEqual(result['class_attributes'], [dict(cls='Widget', attr='TABLE', body_read=True)])
+
+    def test_mutations_that_may_raise_at_import_fall_back(self):
+        old = 'class Widget(Base):\n    TABLE = {"a": 1, "b": 2}\n    TABLE.pop("a")\n'
+        for new in (old.replace('pop("a")', 'pop("b")'), old.replace('TABLE.pop', 'OTHER.pop'),
+                    old.replace('pop("a")', 'clear()'), old.replace('pop("a")', 'pop("a", None)'),
+                    old.replace('    TABLE.pop("a")\n', '    TABLE.pop("a")\n    TABLE.pop("b")\n')):
+            with self.subTest(new=new):
+                self.assertIsNone(classify_change(old, new).get('class_attributes'))
+
+    def test_new_names_in_class_values_fall_back(self):
+        old = 'import exp\n\nSECOND = exp.Second\n\nclass Widget(Base):\n    TABLE = {"a": exp.First}\n'
+        self.assertEqual(classify_change(old, old.replace('exp.First}', 'exp.Second}'))['class_attributes'],
+                         [dict(cls='Widget', attr='TABLE', body_read=False)])
+        self.assertIsNone(classify_change(old, old.replace('exp.First}', 'exp.Missing}')).get('class_attributes'))
+        removed = 'class Widget(Base):\n    def run(self):\n        return 1\n    ALIAS = run\n'
+        self.assertIsNone(classify_change(removed, removed.replace('def run(self)', 'def other(self)')).get('members'))
+
+
+class ImportSafetyReview(unittest.TestCase):
+    def test_added_method_shadowing_a_class_body_name_falls_back(self):
+        old = 'def run():\n    return 0\n\n\nclass Widget(Base):\n    ALIAS = run\n'
+        new = old.replace('class Widget(Base):\n', 'class Widget(Base):\n    def run(self):\n        return 1\n\n')
+        self.assertIsNone(classify_change(old, new).get('members'))
+
+    def test_names_only_used_in_function_bodies_are_not_known(self):
+        old = 'import exp\n\nclass Widget(Base):\n    TABLE = {"a": exp.First}\n\ndef f():\n    return later.Second\n'
+        self.assertIsNone(classify_change(old, old.replace('exp.First}', 'later.Second}')).get('class_attributes'))
+
+    def test_mutators_must_match_the_literal_container(self):
+        for value, old, new, ok in [('[1]', 'T.append(1)', 'T.append(2)', True), ('{1}', 'T.append(1)', 'T.append(2)', False),
+                                    ('{"a": 1}', 'T.update(a=1)', 'T.update(a=2)', True),
+                                    ('{"a": 1}', 'T.update({"a": X})', 'T.update({"b": X})', False),
+                                    ('base.copy()', 'T.update(a=1)', 'T.update(a=2)', False)]:
+            source = f'class Widget(Base):\n    T = {value}\n    {old}\n'
+            with self.subTest(value=value, new=new):
+                result = classify_change(source, source.replace(old, new)).get('class_attributes')
+                self.assertEqual(bool(result), ok)

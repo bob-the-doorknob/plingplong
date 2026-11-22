@@ -45,6 +45,7 @@ that breaks tests.
     done
     python tools/generalization.py score --split dev
     python tools/generalization.py score --split holdout
+    python tools/generalization.py score --split p13
 
 Use --checkout with the path of a baseline worktree to compare the same frozen
 cases. Each label run starts from the pinned archive. The scorer emits per-case
@@ -52,6 +53,9 @@ selection, cost, marginal cost of the longest test and missed parent IDs. It
 returns nonzero if any labels are missing, inconclusive or missed. Completed
 cases still receive a separate aggregate. Generated patches and labels live
 under .phase5/generalization and are excluded from the production build.
+
+Rebuild tests.gz, the pinned test-module index, with `python tools/pack_tests.py`
+after the archive is in .phase5/src.tar.
 
 ## Reproduce Phase 12 structural evidence
 

@@ -754,3 +754,99 @@ Module captures, broader test methods, signature changes, import state,
 mixed structural patches and file renames remain conservative. The
 strongest evidence for the new techniques comes from the independent
 validation set. No new official score was measured.
+
+## Phase 13: general structural rules - 2026-11-22
+
+Started from e54d3a1baf564f791fbf5837886c43c60c20ac48 in a separate worktree
+on phase13-import-dataflow. origin/main (9c70a49, merge of PR #8) has the same
+tree. All 40 frozen and validation labels were regenerated on macOS arm64 with
+the locked trace image (pytest 9.2.0, Python 3.13.18) under amd64 emulation.
+Phase 12 reproduced exactly: holdout 500.525, dev 335.614, validation 133.346
+and public 129.530 simulated seconds, all with zero misses.
+
+Holdout fallback causes at the start were: method removed, class added,
+fixture comment, test-module edit, multi-file with a test edit, file delete,
+file rename, import alias, and two sqlglot/__init__.py edits.
+
+New general rules (hybrid.py, semantic.py):
+
+- Function header edits: literal new defaults, unchanged decorators and
+  annotations (unless postponed) select that code object's observations.
+  Functions that also run at import keep the shared fallback.
+- Added, removed or redefined non-dunder methods in non-core classes select
+  receivers of the class family and its import-time holders. Import reads of
+  the name under any ancestor count. Decorators must resolve to pinned
+  functions that only build locals and call locals, parameters, wraps or
+  harmless builtins. Defaults must be literal. Runtime class writes fall back.
+- Top-level literal or from-import rebindings select pinned bytecode readers.
+  Copies in other sqlglot modules are followed one level; importing test modules
+  select their files and importers. Import-time or class-body reads, star
+  imports, own-namespace reflection (globals, vars(), sys.modules, __import__,
+  exec, eval) and unobserved readers fall back.
+- Any edit of an indexed SQL fixture selects its observed readers.
+- Edits of non-collection test modules select their tests and importer files,
+  or only edited test methods. Writes to non-local state, conftest.py and
+  __init__.py fall back. tests.gz ships pinned test sources and static test
+  importers, bound to the base evidence digest (tools/pack_tests.py).
+- arg_types edits of any non-core Expression class may ignore <module> reads
+  of name-derived registry keys only.
+- A class-body NAME.method(...) edit is an attribute change taking the broad
+  holder path, limited to mutators that cannot raise.
+- Docstring text edits that keep each docstring are treated like comments.
+
+Miss found and fixed: an independent mutation replaced KEYWORDS.pop("DIV")
+with a second KEYWORDS.pop("ISNULL"). The class body raised KeyError at import
+and collection failed for 35 test files, outside the selected receivers.
+Import-time evaluation must now be non-raising: safe mutators only, no new
+dotted names in non-literal class values, and no class-body reference to a
+removed method. That case now selects all 1620 tests. Its label is
+inconclusive because of the collection errors.
+
+| Split (labels) | Phase 12 CI (s) | Phase 13 CI (s) | Full Phase 12 -> 13 | Misses |
+| --- | ---: | ---: | ---: | ---: |
+| Public 30 | 129.530 | 129.530 | 0 -> 0 | 0 |
+| Frozen holdout 17 | 500.525 | 370.546 | 10 -> 5 | 0 |
+| Dev 14 complete | 335.614 | 245.287 | 5 -> 2 | 0 |
+| Validation 6 | 133.346 | 98.559 | 2 -> 1 | 0 |
+| New P13 16 complete | 589.072 | 229.976 | 16 -> 2 | 0 |
+
+Restricted Docker (linux/amd64 emulated on arm64, three runs each, identical
+outputs): median selector CPU was 1.335 s public (Phase 12 1.295 s), 1.110 s
+holdout (Phase 12 0.723 s), 0.609 s validation and 1.841 s P13. Peak RSS was
+135176 KiB. make sample passed (129.530 s, zero misses) and make check printed
+format ok. 117 unit tests passed on the host. The holdout total including
+emulated CPU is 371.656 seconds, below the 400-second target.
+
+A seeded organizer-style survey (300 random swaps, literals, comments, fixture
+and multi-file edits, no labels) estimated a mean cost of 11.97 s per patch for
+P13-A and 8.86 s after P13-B. A fresh seed gave 8.98 s. The survey has no labels
+and only estimates cost.
+
+Residual risks: derived import-time computations (metaclasses,
+__init_subclass__) may raise on unusual literal values. Shared state leaks
+from test-method edits are excluded by a static check, not traced. Docstring
+treatment relies on the absence of __doc__ readers in pinned sources and
+collected tests. File add, delete and rename, class addition and
+sqlglot/__init__.py edits still use the full suite.
+
+### P13 survey labels and review fixes
+
+tools/label_patch.py labels an arbitrary same-path patch against the pinned
+archive with the locked image. Thirty organizer-style survey patches (seed 41)
+were labeled. All were chosen from cases Phase 13 narrows and Phase 12 sends to
+the full suite. Strata: 7 member or header, 1 module binding, 6 docstring, 4
+statement and 12 fixture. All 30 labels completed. No commit was missed and all
+41 failing parent IDs were retained. The batch cost 205.260 simulated seconds,
+against 1104.510 for Phase 12.
+
+A code review of the import-safety gates led to three changes. A method
+addition is checked for class-body name reads, like a removal. Known dotted
+names come only from module and class scope. Class-body mutators must match the
+literal container type of the attribute and take only literal arguments. All
+labeled split decisions were unchanged, and 120 unit tests passed.
+
+Final candidate (restricted linux/amd64 Docker under emulation, three identical
+runs each): public 129.530 s with 1.346 s median CPU; holdout 370.546 s with
+1.098 s; P13 set 266.793 s with 1.824 s. The P13 set includes the inconclusive
+BigQuery case, which selects the full suite. make sample and make check passed.
+Labeled misses across public, holdout, dev, validation, P13 and the survey: zero.

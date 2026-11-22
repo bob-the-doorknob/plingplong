@@ -86,6 +86,36 @@ PHASE12 = {
         'self.assertEqual(1, subsecond_precision("garbage"))')]),
 }
 CASES.update(PHASE12)
+# Phase 13 independent validation of member, signature, fixture-text and test-module rules.
+PHASE13 = {
+    'p13_postgres_method_removed': ('method_removed', 'p13', [('sqlglot/generators/postgres.py', '    def arraysize_sql(', '    def _disabled_arraysize_sql(')]),
+    'p13_duckdb_decorated_removed': ('method_removed', 'p13', [('sqlglot/generators/duckdb.py', '    def reduce_sql(', '    def _disabled_reduce_sql(')]),
+    'p13_postgres_parser_override': ('method_added', 'p13', [('sqlglot/parsers/postgres.py', '    def _parse_convert(',
+                                     '    def _parse_bitwise(self):\n        return self._parse_term()\n\n    def _parse_convert(')]),
+    'p13_normalize_default': ('signature', 'p13', [('sqlglot/optimizer/normalize.py', 'max_distance: int = 128', 'max_distance: int = 1')]),
+    'p13_convert_default': ('signature', 'p13', [('sqlglot/parsers/postgres.py', 'safe: bool | None = None) -> exp.Expr | None:', 'safe: bool | None = True) -> exp.Expr | None:')]),
+    'p13_fixture_execute_flag': ('fixture_comment', 'p13', [('tests/fixtures/optimizer/qualify_columns.sql', '# execute: false\n# schema: {"zz"', '# execute: true\n# schema: {"zz"')]),
+    'p13_fixture_header_comment': ('fixture_comment', 'p13', [('tests/fixtures/optimizer/qualify_columns.sql', '-- Qualify columns', '-- Qualify every column')]),
+    'p13_tokens_test_method': ('test_side', 'p13', [('tests/test_tokens.py', 'tokens = Tokenizer().tokenize("SHOW;")', 'tokens = Tokenizer().tokenize("SHOW")')]),
+    'p13_hive_dateint_literal': ('module_global', 'p13', [('sqlglot/generators/hive.py', 'HIVE_DATEINT_FORMAT = "\'yyyyMMdd\'"', 'HIVE_DATEINT_FORMAT = "\'yyyyMMd\'"')]),
+    'p13_snowflake_scale_literal': ('module_global', 'p13', [('sqlglot/typing/snowflake.py', 'MAX_SCALE = 37', 'MAX_SCALE = 36')]),
+    'p13_canonicalize_import_alias': ('imports', 'p13', [('sqlglot/optimizer/canonicalize.py',
+        'from sqlglot.helper import is_date_unit, is_iso_date, is_iso_datetime',
+        'from sqlglot.helper import is_date_unit, is_iso_datetime as is_iso_date, is_iso_datetime')]),
+    'p13_argtypes_nonleaf': ('class_constant', 'p13', [('sqlglot/expressions/constraints.py',
+        'arg_types = {"this": False, "kind": True}', 'arg_types = {"this": True, "kind": True}')]),
+    'p13_argtypes_rename': ('class_constant', 'p13', [('sqlglot/expressions/aggregate.py',
+        'arg_types = {"this": True, "nulls_excluded": False}', 'arg_types = {"this": True, "nulls_excluded_alt": False}')]),
+    'p13_bigquery_keywords_pop': ('class_constant', 'p13', [('sqlglot/dialects/bigquery.py',
+        'KEYWORDS.pop("DIV")', 'KEYWORDS.pop("ISNULL")')]),
+    'p13_clickhouse_keywords_pop': ('class_constant', 'p13', [('sqlglot/dialects/clickhouse.py',
+        'KEYWORDS.pop("/*+")', 'KEYWORDS.pop("/*+", None)')]),
+    'p13_docstring_text': ('docstring', 'p13', [('sqlglot/optimizer/unnest_subqueries.py',
+        'Convert scalar subqueries into cross joins.', 'Convert scalar subqueries into joins.')]),
+    'p13_class_docstring': ('docstring', 'p13', [('sqlglot/optimizer/qualify_tables.py',
+        'Rewrite sqlglot AST to have fully qualified tables.', 'Rewrite the AST to have qualified tables.')]),
+}
+CASES.update(PHASE13)
 
 
 def digest(payload):
@@ -298,7 +328,7 @@ def main():
     parser.add_argument('action', choices=['list', 'generate', 'label', 'score'])
     parser.add_argument('case', nargs='?', choices=['baseline', *CASES])
     parser.add_argument('--checkout', type=Path, default=ROOT)
-    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'all'], default='all')
+    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'p13', 'all'], default='all')
     args = parser.parse_args()
     if args.action == 'list':
         print('\n'.join(['baseline', *CASES]))
