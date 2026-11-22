@@ -680,3 +680,77 @@ the commit containing this report on phase11-generalization. This
 designed mutation suite is independent of the public labels. Its
 category frequencies and scores provide no estimate of the private
 practice or final distribution.
+
+## Phase 12-0 local submission audit
+
+Fetched main at 85b96c0, whose tree matches 62aecb11129a55406739ea271d5e354a4cb3a227.
+A clean linux/amd64 Docker build from git -c core.autocrlf=false archive
+at that SHA matched every production Python and evidence blob by SHA-256.
+The first archive used host CRLF conversion on Python files. Rebuilding
+without conversion removed the byte differences. The verified image
+uses Python 3.13.18 and is sha256:2a9e99979fb092dae94616be3a17bff8e83902288eff0a20ef43eab6e4fe505f.
+Use tools/provenance.py COMMIT IMAGE DIAGNOSTIC_PATCH_DIRECTORY to repeat
+the digest audit with production limits and inputs mounted read-only.
+
+The diagnostic output digest is b2f4f65867dce129343cf8dbb1ceb98d04b5a85059974cbc3a804db83c966cab.
+The newline case selected 331 tests. The three supported generator
+overrides selected 33, 106 and 120, while the unsupported structural edit
+selected 1620. All three restricted runs on the 17 holdouts scored 500.525
+simulated seconds with zero misses. Production rules are active locally.
+The organizer's receipts and private decisions could not be verified.
+The identical 334.724-second official simulated totals remain unexplained.
+
+## Phase 12-A module scalar reads
+
+The static packer derives exact direct function readers of a scalar
+from the pinned source and binds the certificate to the original
+coverage digest and organizer catalog. The original and patched AST
+must differ only in one same-type immutable assignment value. Imported
+aliases, import-time and nested captures, reflective namespaces and
+unresolved readers keep the full selection. The pinned certificate
+currently covers nine serde bindings. The public and frozen holdout
+simulated scores stayed 129.530 and 500.525 seconds with zero misses
+in Docker. The existing serde development case and two fresh scalar
+validation cases each saved 9.363 seconds. All 71 failing parent IDs
+from those three cases were retained.
+
+## Phase 12-B integrated candidate
+
+The exact H image selected 1620 for all five provenance diagnostic
+cases. The exact Phase 11 image narrowed four. The two verified
+artifacts demonstrate that the local build runs the intended rules.
+They provide no organizer-side image or per-patch attribution.
+
+| Version | Public CI | Frozen holdout CI | Holdout median CPU | Holdout total | Holdout full fallbacks | New validation CI |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Phase 11 / P12-0 | 129.530 | 500.525 | 0.594 | 501.119 | 10 | 220.902 |
+| P12-A | 129.530 | 500.525 | 0.601 | 501.126 | 10 | 202.176 |
+| P12-B integrated | 129.530 | 500.525 | 0.608 | 501.133 | 10 | 133.346 |
+
+All measured public, holdout and new validation batches had zero
+misses. The integrated public CPU median was 1.229 seconds. Each row
+uses three restricted Linux/amd64 runs on the same input sets. The
+frozen holdout mean remained 1003.47 selected tests and its output
+was identical across all versions. All 805 known failures were retained.
+The sub-400 holdout target remains open.
+
+The new validation set contained six completed mutations. Terminal
+assertions in two test modules saved 34.419 and 34.411 seconds and
+retained both failing IDs. The test with the changed first argument
+stayed full-suite. The exportable ANSI scalar also stayed full-suite.
+The global and test-side rules saved 96.919 simulated seconds across
+the 37 labeled development, holdout and validation mutations combined.
+All 1122 failing parent IDs were retained. The inherited trie_default
+collection failure stays inconclusive and selected 1620.
+
+The pinned assertion scan certified 67 sites. Review found the draft
+omitted source readers in the test-side return path. The released path
+retains them, including full fallback for shared readers, and a
+regression test covers both cases. The image passed both Make targets
+and 101 unit tests. Peak RSS was 90584 KiB, the largest stdout was
+140758 bytes, and public stdout stayed byte-identical at 3104 bytes.
+
+Module captures, broader test methods, signature changes, import state,
+mixed structural patches and file renames remain conservative. The
+strongest evidence for the new techniques comes from the independent
+validation set. No new official score was measured.

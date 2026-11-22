@@ -36,3 +36,8 @@
 - Never force-push, change visibility or submit without authorization.
 - Production evidence must match the pinned archive and full organizer ID set.
   Rebuild with the README commands and run tools/check_mutations.py after both mutation runs.
+- Structural metadata must match the pinned catalog and base evidence digest.
+  Keep scalar fallbacks for aliases, captures and unobserved readers.
+  Test-side narrowing requires the terminal literal and two-order operand
+  evidence. Retain raw readers and uncertain tests. Re-run validation and
+  the frozen holdout before changing either rule.

@@ -71,3 +71,19 @@ source, checks related import reads and writes, and keeps every observed
 receiver, static test importer, raw source reader and uncertain test.
 Structural changes outside that narrow form can still require the full suite.
 Both rules reuse the pinned indexes and execute no patched code.
+
+## Phase 12 structural evidence
+
+The auxiliary index is pinned to the SQLGlot source, base evidence and
+organizer catalog. Module scalars use direct function readers from the
+pinned AST. Import aliases, captured defaults, class and module reads,
+nested scopes, writes and ambiguous module access retain the fallback.
+
+The test-side rule checks that only the expected literal of a terminal
+unittest assertEqual changed. It requires the same primitive type in the
+original and replacement, a plain test class, exact source preservation
+outside the literal and matching actual operand types in both suite
+orders. The packer rejects observed source readers and statically
+referenced test modules and methods. Runtime retains source readers and
+uncertain tests. Finite tracing and static reference checks still have
+limits for indirect reflection, cross-test state and child processes.
