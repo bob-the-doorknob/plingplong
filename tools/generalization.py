@@ -86,6 +86,19 @@ PHASE12 = {
         'self.assertEqual(1, subsecond_precision("garbage"))')]),
 }
 CASES.update(PHASE12)
+# Phase 13 independent validation of member, signature, fixture-text and test-module rules.
+PHASE13 = {
+    'p13_postgres_method_removed': ('method_removed', 'p13', [('sqlglot/generators/postgres.py', '    def arraysize_sql(', '    def _disabled_arraysize_sql(')]),
+    'p13_duckdb_decorated_removed': ('method_removed', 'p13', [('sqlglot/generators/duckdb.py', '    def reduce_sql(', '    def _disabled_reduce_sql(')]),
+    'p13_postgres_parser_override': ('method_added', 'p13', [('sqlglot/parsers/postgres.py', '    def _parse_convert(',
+                                     '    def _parse_bitwise(self):\n        return self._parse_term()\n\n    def _parse_convert(')]),
+    'p13_normalize_default': ('signature', 'p13', [('sqlglot/optimizer/normalize.py', 'max_distance: int = 128', 'max_distance: int = 1')]),
+    'p13_convert_default': ('signature', 'p13', [('sqlglot/parsers/postgres.py', 'safe: bool | None = None) -> exp.Expr | None:', 'safe: bool | None = True) -> exp.Expr | None:')]),
+    'p13_fixture_execute_flag': ('fixture_comment', 'p13', [('tests/fixtures/optimizer/qualify_columns.sql', '# execute: false\n# schema: {"zz"', '# execute: true\n# schema: {"zz"')]),
+    'p13_fixture_header_comment': ('fixture_comment', 'p13', [('tests/fixtures/optimizer/qualify_columns.sql', '-- Qualify columns', '-- Qualify every column')]),
+    'p13_tokens_test_method': ('test_side', 'p13', [('tests/test_tokens.py', 'tokens = Tokenizer().tokenize("SHOW;")', 'tokens = Tokenizer().tokenize("SHOW")')]),
+}
+CASES.update(PHASE13)
 
 
 def digest(payload):
@@ -298,7 +311,7 @@ def main():
     parser.add_argument('action', choices=['list', 'generate', 'label', 'score'])
     parser.add_argument('case', nargs='?', choices=['baseline', *CASES])
     parser.add_argument('--checkout', type=Path, default=ROOT)
-    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'all'], default='all')
+    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'p13', 'all'], default='all')
     args = parser.parse_args()
     if args.action == 'list':
         print('\n'.join(['baseline', *CASES]))

@@ -42,12 +42,15 @@ class Reconstruction(unittest.TestCase):
             with self.subTest(body=body), self.assertRaises(ValueError):
                 apply_patch(prefix + body, {'x': 'a\nz\n'})
 
-    def test_sql_comment_and_spacing_fall_back(self):
+    def test_sql_comment_and_spacing_select_readers(self):
         for old,new in [('-- abc','-- def'),('SELECT 1','SELECT   1')]:
             path='tests/fixtures/example.sql'
             p=f'diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-{old}\n+{new}\n'
             data={'sources':{path:old+'\n'},'hits':{path:[0]},'ids':['one','two']}
-            self.assertIsNone(decide(p,data)[0])
+            self.assertEqual(decide(p,data), ({'one'}, 'observed'))
+            for readers in ([], [-1]):
+                data['hits'][path] = readers
+                self.assertIsNone(decide(p,data)[0])
 
     def test_missing_shared_and_unobserved_evidence(self):
         path = 'sqlglot/toy.py'
@@ -76,13 +79,13 @@ class FixtureComments(unittest.TestCase):
     def test_code_edit_outside_block_comments_selects_readers(self):
         self.assertEqual(self.decide(['/* header */', 'SELECT 1;', '/* footer */'], 'SELECT 2;'), ({'one'}, 'observed'))
 
-    def test_comment_edits_with_block_comments_fall_back(self):
+    def test_comment_edits_select_readers(self):
         cases = [(['/* a', 'b', 'c */'], 'B'), (['/* a */', 'SELECT 1;', 'x'], 'SELECT 1; /* note */'),
                  (['/* a */', 'SELECT 1; -- one', 'x'], 'SELECT 1; -- two'), (['/* a */', 'SELECT 1;', 'x'], 'SELECT 1; */'),
                  (['x', 'SELECT 1; -- c', '*/'], 'SELECT 1; -- c /*'), (['/* open', 'SELECT 1;', 'x'], 'SELECT 2;')]
         for old, new in cases:
             with self.subTest(old=old, new=new):
-                self.assertIsNone(self.decide(old, new)[0])
+                self.assertEqual(self.decide(old, new), ({'one'}, 'observed'))
 
 
 def git_patch(changes):
@@ -114,32 +117,50 @@ class GeneratorOverride(unittest.TestCase):
         patch = git_patch({self.PATH: (self.OLD, self.OLD + self.METHOD)})
         self.assertEqual(decide(patch, self.data()), ({'receiver', 'reader', 'importer'}, 'generator_override'))
 
-    def test_observed_import_or_subclass_keeps_full_suite(self):
+    def test_module_import_read_through_class_or_ancestor_keeps_full_suite(self):
         patch = git_patch({self.PATH: (self.OLD, self.OLD + self.METHOD)})
         cls = self.PATH + '::Toy'
         base = self.BASE + '::Generator'
-        for key in (cls + '@__dict__', base + '@select_sql'):
+        for key in (cls + '@__dict__', base + '@select_sql', base + '@where_sql'):
             data = self.data()
             data['classes']['I'][key] = ['<module>']
-            self.assertIsNone(decide(patch, data)[0])
-        data = self.data()
-        data['classes']['M']['other::Child'] = [cls]
-        self.assertIsNone(decide(patch, data)[0])
+            method = self.METHOD.replace('select_sql', 'where_sql') if 'where' in key else self.METHOD
+            self.assertIsNone(decide(git_patch({self.PATH: (self.OLD, self.OLD + method)}), data)[0])
 
-    def test_mutation_and_edits_before_end_keep_full_suite(self):
+    def test_subclass_receivers_join_the_selection(self):
+        data = self.data()
+        data['classes']['M']['other::Child'] = [self.PATH + '::Toy']
+        data['classes']['R']['other::Child'] = [2]
+        patch = git_patch({self.PATH: (self.OLD, self.OLD + self.METHOD)})
+        self.assertEqual(decide(patch, data), ({'receiver', 'reader', 'other', 'importer'}, 'structure'))
+
+    def test_import_consumer_of_ancestor_name_joins_the_selection(self):
+        data = self.data()
+        data['classes']['M']['other::Holder'] = []
+        data['classes']['R']['other::Holder'] = [2]
+        data['classes']['I'][self.BASE + '::Generator@select_sql'] = ['other::Holder']
+        patch = git_patch({self.PATH: (self.OLD, self.OLD + self.METHOD)})
+        self.assertEqual(decide(patch, data), ({'receiver', 'reader', 'other', 'importer'}, 'structure'))
+
+    def test_runtime_class_write_keeps_full_suite(self):
         patch = git_patch({self.PATH: (self.OLD, self.OLD + self.METHOD)})
         data = self.data()
         data['classes']['W'].append(self.PATH + '::Toy@select_sql')
         self.assertIsNone(decide(patch, data)[0])
-        middle = self.OLD.replace('    CONFIG = True\n', self.METHOD + '    CONFIG = True\n')
-        patch = git_patch({self.PATH: (self.OLD, middle)})
-        self.assertIsNone(decide(patch, self.data())[0])
 
-    def test_unknown_bindings_and_nonliteral_bodies_keep_full_suite(self):
-        for method in (self.METHOD.replace('select_sql', 'where_sql'),
-                       self.METHOD.replace('"SELECT 0"', 'other()'),
-                       self.METHOD.replace('expression)', 'expression=None)'),
-                       '    @staticmethod\n' + self.METHOD):
+    def test_other_members_select_class_receivers(self):
+        middle = self.OLD.replace('    CONFIG = True\n', self.METHOD + '    CONFIG = True\n')
+        for new in (middle, self.OLD + self.METHOD.replace('select_sql', 'where_sql'),
+                    self.OLD + self.METHOD.replace('"SELECT 0"', 'other()'),
+                    self.OLD + self.METHOD.replace('expression)', 'expression=None)'),
+                    self.OLD + '    @staticmethod\n' + self.METHOD):
+            with self.subTest(new=new):
+                patch = git_patch({self.PATH: (self.OLD, new)})
+                self.assertEqual(decide(patch, self.data()), ({'receiver', 'reader', 'importer'}, 'structure'))
+
+    def test_unsafe_members_keep_full_suite(self):
+        for method in ('    @register\n' + self.METHOD, self.METHOD.replace('expression)', 'expression=make())'),
+                       self.METHOD.replace('select_sql', '__eq__')):
             with self.subTest(method=method):
                 patch = git_patch({self.PATH: (self.OLD, self.OLD + method)})
                 self.assertIsNone(decide(patch, self.data())[0])
@@ -201,3 +222,132 @@ class CommentOnly(unittest.TestCase):
     def test_reconstruction_failure_falls_back(self):
         patch = git_patch({self.A: (self.OLD_A.replace('os', 'sys'), '# note\n' + self.OLD_A.replace('os', 'sys'))})
         self.assertEqual(decide(patch, self.data()), (None, 'unsupported_diff'))
+
+
+class Structure(unittest.TestCase):
+    PATH, HELPER = 'sqlglot/toys/widget.py', 'sqlglot/toys/helpers.py'
+    OLD = ('from __future__ import annotations\n\nfrom sqlglot.toys.helpers import mark, register\n\n\n'
+           'def build(value, flag=False):\n    return value\n\n\nclass Widget:\n    def run(self, x=1):\n        return x\n')
+    HELPERS = ('from functools import wraps\n\nREGISTRY = []\n\n\ndef mark(*names):\n    seen = {}\n'
+               '    for name in names:\n        seen[name] = None\n\n    def decorator(func):\n        @wraps(func)\n'
+               '        def inner(self, e):\n            self.note(seen)\n            return func(self, e)\n\n'
+               '        return inner\n\n    return decorator\n\n\ndef register(func):\n    REGISTRY.append(func)\n    return func\n')
+
+    def data(self):
+        cls = self.PATH + '::Widget'
+        return {'ids': ['t0', 't1', 't2', 't3', 't4'], 'sources': {self.PATH: self.OLD, self.HELPER: self.HELPERS},
+                'hits': {'!untraced': [0], self.PATH + '::build': [1], self.PATH + '::Widget.run': [2]},
+                'classes': {'M': {cls: []}, 'R': {cls: [3]}, 'I': {}, 'W': []}}
+
+    def run_patch(self, new, data=None):
+        return decide(git_patch({self.PATH: (self.OLD, new)}), data or self.data())
+
+    def test_literal_default_edits_select_callers(self):
+        self.assertEqual(self.run_patch(self.OLD.replace('flag=False', 'flag=True')), ({'t0', 't1'}, 'structure'))
+        self.assertEqual(self.run_patch(self.OLD.replace('x=1', 'x=2')), ({'t0', 't2'}, 'structure'))
+        self.assertEqual(self.run_patch(self.OLD.replace('flag=False)', 'flag=False, extra=None)')), ({'t0', 't1'}, 'structure'))
+
+    def test_unsafe_header_edits_keep_full_suite(self):
+        for old, new in [('flag=False', 'flag=make()'), ('def build(', '@mark("a")\ndef build('),
+                         ('from __future__ import annotations\n\n', '')]:
+            with self.subTest(new=new):
+                self.assertIsNone(self.run_patch(self.OLD.replace(old, new))[0])
+        data = self.data()
+        data['hits'][self.PATH + '::build'] = [-1]
+        self.assertIsNone(self.run_patch(self.OLD.replace('flag=False', 'flag=True'), data)[0])
+
+    def test_pure_decorated_member_selects_receivers(self):
+        method = '\n    @mark("a", ("b", "why"))\n    def other(self, e):\n        return e\n'
+        self.assertEqual(self.run_patch(self.OLD + method), ({'t0', 't3'}, 'structure'))
+        for decorator in ('@register', '@mark(make())', '@unknown'):
+            with self.subTest(decorator=decorator):
+                self.assertIsNone(self.run_patch(self.OLD + method.replace('@mark("a", ("b", "why"))', decorator))[0])
+
+
+class TestModules(unittest.TestCase):
+    PATH, HELPER = 'tests/test_toy.py', 'tests/helpers.py'
+    OLD = ('import unittest\nfrom tests.helpers import load\n\nSTATE = {}\n\n\nclass TestToy(unittest.TestCase):\n'
+           '    def check(self, x):\n        return x\n\n    def test_a(self):\n        value = {"x": 1}\n        value["x"] = 2\n'
+           '        self.assertEqual(value["x"], 2)\n\n    def test_b(self):\n        self.assertTrue(self.check(1))\n')
+    IDS = ['tests/test_toy.py::TestToy::test_a', 'tests/test_toy.py::TestToy::test_b',
+           'tests/test_other.py::TestOther::test_c', 'tests/test_far.py::TestFar::test_d']
+
+    def data(self, importers=()):
+        return {'ids': self.IDS, 'sources': {}, 'hits': {'!untraced': []},
+                'test_evidence': {'sources': {self.PATH: self.OLD, self.HELPER: 'def load():\n    return 1\n',
+                                              'tests/conftest.py': 'X = 1\n'},
+                                  'importers': {self.PATH: list(importers), self.HELPER: ['tests/test_toy.py']}}}
+
+    def run_patch(self, new, data=None, path=None):
+        path = path or self.PATH
+        old = (data or self.data())['test_evidence']['sources'][path]
+        return decide(git_patch({path: (old, new)}), data or self.data())
+
+    def test_test_method_body_selects_that_test(self):
+        self.assertEqual(self.run_patch(self.OLD.replace('value["x"] = 2', 'value["x"] = 3')),
+                         ({self.IDS[0]}, 'test_method'))
+        data = self.data(importers=['tests/test_other.py'])
+        self.assertEqual(self.run_patch(self.OLD.replace('value["x"] = 2', 'value["x"] = 3'), data),
+                         ({self.IDS[0], self.IDS[2]}, 'test_method'))
+
+    def test_helpers_and_module_level_edits_select_the_module(self):
+        self.assertEqual(self.run_patch(self.OLD.replace('return x', 'return not x')), (set(self.IDS[:2]), 'test_module'))
+        self.assertEqual(self.run_patch(self.OLD.replace('STATE = {}', 'STATE = {1: 2}')), (set(self.IDS[:2]), 'test_module'))
+        self.assertEqual(self.run_patch('def load():\n    return 2\n', path=self.HELPER), (set(self.IDS[:2]), 'test_module'))
+        self.assertEqual(self.run_patch(self.OLD.replace('def test_b', 'def test_b(self:'))[0], set(self.IDS[:2]))
+
+    def test_shared_state_and_collection_files_keep_full_suite(self):
+        for old, new in [('value["x"] = 2', 'STATE["x"] = 2'), ('value["x"] = 2', 'unittest.mock = None'),
+                         ('value["x"] = 2', 'STATE.update(x=2)'), ('STATE = {}', 'STATE = {}\nload.cache = 1')]:
+            with self.subTest(new=new):
+                self.assertEqual(self.run_patch(self.OLD.replace(old, new)), (None, 'test_state'))
+        self.assertEqual(self.run_patch('X = 2\n', path='tests/conftest.py'), (None, 'test_structure'))
+
+
+class ModuleBindings(unittest.TestCase):
+    PATH, OTHER, LIB = 'sqlglot/toys/fmt.py', 'sqlglot/toys/user.py', 'sqlglot/toys/lib.py'
+    OLD = ('from sqlglot.toys.lib import first, second\n\nLIMIT = 3\n\n\ndef render(x):\n    return first(x)[:LIMIT]\n\n\n'
+           'def other(x):\n    return second(x)\n')
+    LIB_SOURCE = 'def first(x):\n    return x\n\n\ndef second(x):\n    return x\n'
+    USER = 'from sqlglot.toys.fmt import LIMIT\n\n\ndef use():\n    return LIMIT\n'
+
+    def data(self, user=None, tests=None):
+        sources = {self.PATH: self.OLD, self.LIB: self.LIB_SOURCE}
+        if user:
+            sources[self.OTHER] = user
+        return {'ids': ['t0', 't1', 't2', 'tests/test_fmt.py::T::test_x', 'tests/test_fmt.py::T::test_y'],
+                'sources': sources,
+                'hits': {'!untraced': [0], self.PATH + '::render': [1], self.PATH + '::other': [2],
+                         self.OTHER + '::use': [2]},
+                'test_evidence': {'sources': tests or {}, 'importers': {}}}
+
+    def run_patch(self, new, data=None):
+        return decide(git_patch({self.PATH: (self.OLD, new)}), data or self.data())
+
+    def test_literal_and_import_bindings_select_runtime_readers(self):
+        self.assertEqual(self.run_patch(self.OLD.replace('LIMIT = 3', 'LIMIT = 4')), ({'t0', 't1'}, 'module_binding'))
+        # second is no longer bound, so its reader fails too.
+        new = self.OLD.replace('import first, second', 'import first, second as first')
+        self.assertEqual(self.run_patch(new), ({'t0', 't1', 't2'}, 'module_binding'))
+        new = self.OLD.replace('import first, second', 'import second as first, second')
+        self.assertEqual(self.run_patch(new), ({'t0', 't1'}, 'module_binding'))
+
+    def test_copies_in_other_modules_are_followed_once(self):
+        self.assertEqual(self.run_patch(self.OLD.replace('LIMIT = 3', 'LIMIT = 4'), self.data(user=self.USER)),
+                         ({'t0', 't1', 't2'}, 'module_binding'))
+        tests = {'tests/test_fmt.py': 'from sqlglot.toys.fmt import LIMIT\n'}
+        self.assertEqual(self.run_patch(self.OLD.replace('LIMIT = 3', 'LIMIT = 4'), self.data(tests=tests))[0],
+                         {'t0', 't1', 'tests/test_fmt.py::T::test_x', 'tests/test_fmt.py::T::test_y'})
+
+    def test_unbounded_bindings_keep_full_suite(self):
+        cases = [(self.OLD.replace('LIMIT = 3', 'LIMIT = "3"'), None),
+                 (self.OLD.replace('LIMIT = 3', 'LIMIT = 3\nCACHE = LIMIT').replace('LIMIT = 3\n', 'LIMIT = 4\n', 1), None),
+                 (self.OLD.replace('import first, second', 'import first, missing'), None),
+                 (self.OLD.replace('LIMIT = 3', 'LIMIT = 4'), self.data(user='from sqlglot.toys.fmt import *\n')),
+                 (self.OLD.replace('LIMIT = 3', 'LIMIT = 4'), self.data(user='from sqlglot.toys import fmt\nX = fmt.LIMIT\n'))]
+        for new, data in cases:
+            with self.subTest(new=new[:60]):
+                self.assertIsNone(self.run_patch(new, data)[0])
+        data = self.data()
+        data['hits'][self.PATH + '::render'] = [-1]
+        self.assertIsNone(self.run_patch(self.OLD.replace('LIMIT = 3', 'LIMIT = 4'), data)[0])
