@@ -123,6 +123,26 @@ def _boolean_schema_edit(before, after):
     return [key.value for key in first.value.keys] == [key.value for key in second.value.keys]
 
 
+def _mutating_call(node):
+    """(name, method) of a class-body statement NAME.method(...), else None."""
+    if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute) and isinstance(node.value.func.value, ast.Name)
+            and not node.value.func.value.id.startswith('__')):
+        return node.value.func.value.id, node.value.func.attr
+    return None
+
+
+def without_docstrings(source):
+    """AST dump with the text of every existing docstring blanked, or None."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+                first.value.value = ''
+    return ast.dump(tree)
+
+
 def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
     if len(old_body) != len(new_body):
         return None
@@ -140,6 +160,13 @@ def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
             if len(inner) == 1 and _boolean_schema_edit(a, b):
                 inner[0]['boolean_schema'] = True
             changes.extend(inner)
+            continue
+        mutated = _mutating_call(a) if in_class else None
+        if mutated and mutated == _mutating_call(b) and _bindings(old_body, mutated[0]) == 1 \
+                and _bindings(new_body, mutated[0]) == 1 and any(
+                    _assigned_name(st) == mutated[0] for st in old_body):
+            # A class-body call such as KEYWORDS.pop("X") changes the value of that attribute.
+            changes.append(dict(cls=prefix[:-1], attr=mutated[0], body_read=True))
             continue
         name = _assigned_name(a) if in_class else None
         if (not name or name.startswith('__') or name != _assigned_name(b)

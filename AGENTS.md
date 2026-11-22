@@ -20,6 +20,10 @@
   modules one level; edits of non-collection test modules select their tests and
   importer files, or only edited test methods. Import-time or <module> reads,
   reflection, state writes, unobserved readers and class writes fall back.
+- Docstring text edits (docstrings kept) are treated like comments. A class-body
+  NAME.method(...) call edit is a change of attribute NAME (body read). Any
+  arg_types value edit of a non-core Expression class may ignore <module> reads of
+  name-derived registry keys only; other module reads fall back.
 - Class-level assignment values may narrow in a
   non-core file (not parser.py, generator.py, tokens.py, dialects/dialect.py,
   expressions/core.py or any __init__.py), using traced attribute reads. Import

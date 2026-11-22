@@ -97,6 +97,23 @@ PHASE13 = {
     'p13_fixture_execute_flag': ('fixture_comment', 'p13', [('tests/fixtures/optimizer/qualify_columns.sql', '# execute: false\n# schema: {"zz"', '# execute: true\n# schema: {"zz"')]),
     'p13_fixture_header_comment': ('fixture_comment', 'p13', [('tests/fixtures/optimizer/qualify_columns.sql', '-- Qualify columns', '-- Qualify every column')]),
     'p13_tokens_test_method': ('test_side', 'p13', [('tests/test_tokens.py', 'tokens = Tokenizer().tokenize("SHOW;")', 'tokens = Tokenizer().tokenize("SHOW")')]),
+    'p13_hive_dateint_literal': ('module_global', 'p13', [('sqlglot/generators/hive.py', 'HIVE_DATEINT_FORMAT = "\'yyyyMMdd\'"', 'HIVE_DATEINT_FORMAT = "\'yyyyMMd\'"')]),
+    'p13_snowflake_scale_literal': ('module_global', 'p13', [('sqlglot/typing/snowflake.py', 'MAX_SCALE = 37', 'MAX_SCALE = 36')]),
+    'p13_canonicalize_import_alias': ('imports', 'p13', [('sqlglot/optimizer/canonicalize.py',
+        'from sqlglot.helper import is_date_unit, is_iso_date, is_iso_datetime',
+        'from sqlglot.helper import is_date_unit, is_iso_datetime as is_iso_date, is_iso_datetime')]),
+    'p13_argtypes_nonleaf': ('class_constant', 'p13', [('sqlglot/expressions/constraints.py',
+        'arg_types = {"this": False, "kind": True}', 'arg_types = {"this": True, "kind": True}')]),
+    'p13_argtypes_rename': ('class_constant', 'p13', [('sqlglot/expressions/aggregate.py',
+        'arg_types = {"this": True, "nulls_excluded": False}', 'arg_types = {"this": True, "nulls_excluded_alt": False}')]),
+    'p13_bigquery_keywords_pop': ('class_constant', 'p13', [('sqlglot/dialects/bigquery.py',
+        'KEYWORDS.pop("DIV")', 'KEYWORDS.pop("ISNULL")')]),
+    'p13_clickhouse_keywords_pop': ('class_constant', 'p13', [('sqlglot/dialects/clickhouse.py',
+        'KEYWORDS.pop("/*+")', 'KEYWORDS.pop("/*+", None)')]),
+    'p13_docstring_text': ('docstring', 'p13', [('sqlglot/optimizer/unnest_subqueries.py',
+        'Convert scalar subqueries into cross joins.', 'Convert scalar subqueries into joins.')]),
+    'p13_class_docstring': ('docstring', 'p13', [('sqlglot/optimizer/qualify_tables.py',
+        'Rewrite sqlglot AST to have fully qualified tables.', 'Rewrite the AST to have qualified tables.')]),
 }
 CASES.update(PHASE13)
 

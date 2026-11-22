@@ -198,7 +198,9 @@ class CommentOnly(unittest.TestCase):
 
     def test_hash_inside_strings_is_code(self):
         self.assertEqual(self.decide_a(self.OLD_A.replace('return "a"', 'return "a # b"')), ({'t0', 't1'}, 'observed'))
-        self.assertEqual(self.decide_a(self.OLD_A.replace('"""Doc."""', '"""Doc. # b"""'))[0], None)
+        # Docstring text is observable only through source readers, like a comment.
+        self.assertEqual(self.decide_a(self.OLD_A.replace('"""Doc."""', '"""Doc. # b"""')), ({'t0'}, 'comment_only'))
+        self.assertIsNone(self.decide_a(self.OLD_A.replace('    """Doc."""\n', ''))[0])
         self.assertEqual(self.decide_a(self.OLD_A.replace('X = "x"', 'X = "x # y"')), (None, 'structural_or_text'))
 
     def test_all_comment_only_without_evidence_selects_nothing(self):

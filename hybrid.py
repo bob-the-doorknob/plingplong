@@ -12,7 +12,7 @@ import zlib
 from pathlib import Path
 
 from impact import changed_files, git_diff_text
-from semantic import classify_change, literal_generator_override, statement_spans
+from semantic import without_docstrings, classify_change, literal_generator_override, statement_spans
 from predicate import comparison_swap
 from structural import literal_binding, terminal_assertion
 from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
@@ -172,7 +172,9 @@ def holders(cls, attr, body_read, evidence, stable_registry_key=False):
         for key, consumers in imports.get(current, ()):
             # Expr.__init_subclass__ sets key from the class name and derives required_args
             # separately. EXPR_CLASSES still registers the same class under the same key.
-            if stable_registry_key and key == cls + '@key':
+            # Expr.__init_subclass__ derives key from the class name alone, so an arg_types
+            # edit cannot change any registry key built from it at module level.
+            if stable_registry_key and key.endswith('@key') and key.startswith('sqlglot/expressions/'):
                 pending.extend(consumer for consumer in consumers if consumer != '<module>')
             else:
                 pending.extend(consumers)
@@ -205,9 +207,8 @@ def class_attribute_tests(data, path, changes, isolated=False):
         if (change['body_read'] or written or attr in evidence['I'] or generic in evidence['I']
                 or attr in evidence['K'] or generic in evidence['K']):
             stable_registry_key = (
-                isolated and change.get('boolean_schema') and path.startswith('sqlglot/expressions/')
-                and evidence['M'][cls] == ['sqlglot/expressions/core.py::Expression']
-                and not children.get(cls)
+                change['attr'] == 'arg_types' and path.startswith('sqlglot/expressions/') and not is_core(path)
+                and not change['body_read']
             )
             found = holders(cls, change['attr'], change['body_read'], evidence, stable_registry_key)
             if found is None:
@@ -874,6 +875,10 @@ def decide(diff, data, mode='scope'):
             if change['ast_equal']:
                 # Comment or layout only: bytecode differs at most in line numbers,
                 # so only tests that read this source as text can observe it.
+                continue
+            if mode == 'scope' and without_docstrings(original) == without_docstrings(new):
+                # Pinned sqlglot reads docstrings only to keep an Expr class's own __doc__,
+                # and no collected test reads __doc__; treat docstring text like comments.
                 continue
             code_changed = True
             skipped = set()

@@ -173,6 +173,11 @@ class ExpressionRegistry(unittest.TestCase):
         subclass = copy.deepcopy(evidence)
         subclass['classes'].pop('_index', None)
         subclass['classes']['M'][CUSTOM] = [cls]
+        # Subclass receivers join; their own derived reads would enter the closure as consumers.
+        self.assertEqual(decide(git_patch({path: (old, new)}), subclass), (names(0, 1, 2, 3), 'observed'))
+        subclass['classes'].pop('_index', None)
+        subclass['classes']['I'][cls + '@arg_types'].append(CUSTOM)
+        subclass['classes']['I'][CUSTOM + '@required_args'] = ['<module>']
         self.assertEqual(decide(git_patch({path: (old, new)}), subclass), (None, 'import_module_read'))
 
         transitive = copy.deepcopy(evidence)
@@ -197,8 +202,9 @@ class ExpressionRegistry(unittest.TestCase):
         )
         old = 'class Example(Expression):\n    arg_types = {"this": True, "optional": False}\n'
         evidence['sources'] = {path: old}
-        for new in (old.replace('optional', 'other'), old.replace('False', '1 / 0')):
-            self.assertIsNone(decide(git_patch({path: (old, new)}), evidence)[0])
+        # Renamed argument keys reach code only through receivers of the class.
+        self.assertEqual(decide(git_patch({path: (old, old.replace('optional', 'other'))}), evidence)[0], names(0, 1))
+        self.assertIsNone(decide(git_patch({path: (old, old.replace('False', '1 / 0'))}), evidence)[0])
 
     def test_import_fallback_for_literal_replaced_with_runtime_expression(self):
         self.assertEqual(run(OLD.replace('SETTING = 1', 'SETTING = 1 / 0')),
@@ -207,3 +213,14 @@ class ExpressionRegistry(unittest.TestCase):
     def test_import_fallback_for_literal_type_change(self):
         self.assertEqual(run(OLD.replace('SETTING = 1', 'SETTING = None')),
                          (None, 'structural_or_text'))
+
+
+class MutatingCalls(unittest.TestCase):
+    def test_class_body_pop_changes_the_attribute_value(self):
+        old = 'class Widget(Base):\n    TABLE = {"a": 1, "b": 2}\n    TABLE.pop("a")\n'
+        result = classify_change(old, old.replace('pop("a")', 'pop("b")'))
+        self.assertEqual(result['class_attributes'], [dict(cls='Widget', attr='TABLE', body_read=True)])
+        for new in (old.replace('TABLE.pop', 'OTHER.pop'), old.replace('pop("a")', 'clear()'),
+                    old.replace('    TABLE.pop("a")\n', '    TABLE.pop("a")\n    TABLE.pop("b")\n')):
+            with self.subTest(new=new):
+                self.assertIsNone(classify_change(old, new).get('class_attributes'))
