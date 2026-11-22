@@ -109,3 +109,17 @@ removal of TPC tests or imply that downstream execution is unchanged.
 
 The default Docker target inherits the original standard-library selector.
 The optional image and the ablation commands are for development.
+
+### Phase 15 structural scope
+
+The numbered pinned tests exercise the library. The audited CLI module
+can be changed or deleted, or moved unchanged to a fresh private
+package-root path. The rule checks exact Git content for deletions,
+requires an unedited atomic rename, and keeps recorded readers and
+uncertainty. Other lifecycle patches retain the original fallback.
+
+For append-only private generator subclasses, the selector checks the
+plain base and its recorded ancestry, verifies a passive definition
+and rules out existing references and subclass enumeration in the pinned
+code and tests. It keeps receiver, importer, text-reader and uncertain
+candidates. Public rebinding and definitions that may run hooks fall back.

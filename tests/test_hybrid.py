@@ -364,3 +364,57 @@ class NamespaceReflection(unittest.TestCase):
                                  ('import sys\nM = sys.modules[__name__]\n', True), ('m = __import__("a")\n', True)]:
             with self.subTest(source=source):
                 self.assertEqual(_reflects_namespace(ast.parse(source)), expected)
+
+class FileLifecycle(unittest.TestCase):
+    def test_cli_deletion_and_rename_retain_readers(self):
+        from hybrid import PIN
+        from tools.generalization import git_diff
+        path = 'sqlglot/__main__.py'
+        text = 'import argparse\n'
+        data = {'pin': PIN, 'ids': ['uncertain', 'reader', 'other'], 'sources': {path: text},
+                'test_evidence': {'sources': {}}, 'hits': {'!untraced': [0], path: [1]}}
+        deletion = git_diff(path, text, None)
+        target = 'sqlglot/_cli_name.py'
+        rename = f'diff --git a/{path} b/{target}\nsimilarity index 100%\nrename from {path}\nrename to {target}\n'
+        for diff in (deletion, rename, git_diff(path, text, 'import sys\n')):
+            self.assertEqual(decide(diff, data), ({'uncertain', 'reader'}, 'entrypoint'))
+        for diff in (deletion.replace('argparse', 'different'), rename + '+changed\n',
+                     rename.replace('_cli_name.py', 'public.py'), deletion + rename):
+            self.assertIsNone(decide(diff, data)[0])
+        data['sources'][target] = 'already exists\n'
+        self.assertIsNone(decide(rename, data)[0])
+        data['hits'][path + '::<module>'] = [2]
+        self.assertIsNone(decide(deletion, data)[0])
+
+    def test_cli_rename_refuses_name_visible_to_pinned_tests(self):
+        from hybrid import PIN
+        path = 'sqlglot/__main__.py'
+        target = 'sqlglot/_cli_name.py'
+        diff = f'diff --git a/{path} b/{target}\nsimilarity index 100%\nrename from {path}\nrename to {target}\n'
+        data = {'pin': PIN, 'ids': ['test'], 'sources': {path: 'import argparse\n'}, 'hits': {},
+                'test_evidence': {'sources': {'tests/test_cli.py': 'from sqlglot import _cli_name\n'}}}
+        self.assertIsNone(decide(diff, data)[0])
+
+
+class PassiveGeneratorClass(unittest.TestCase):
+    def test_private_passive_append_retains_receivers(self):
+        from hybrid import PIN
+        from tools.generalization import git_diff
+        path, root = 'sqlglot/generators/demo.py', 'sqlglot/generator.py'
+        source = 'class Demo(generator.Generator):\n    pass\n'
+        rootcls, cls = root + '::Generator', path + '::Demo'
+        data = {'pin': PIN, 'ids': ['receiver', 'other', 'reader', 'uncertain'],
+                'sources': {path: source, root: 'class Generator:\n    pass\n'},
+                'classes': {'M': {rootcls: [], cls: [rootcls]}, 'I': {}, 'R': {cls: [0]}, 'W': []},
+                'test_evidence': {'sources': {}}, 'hits': {path: [2], '!untraced': [3]}}
+        suffix = '\nclass _Compatibility(Demo):\n    FEATURE = True\n'
+        diff = git_diff(path, source, source + suffix)
+        self.assertEqual(decide(diff, data), ({'receiver', 'reader', 'uncertain'}, 'passive_generator_class'))
+        for edit in (suffix.replace('_Compatibility', 'Demo'), suffix.replace('True', 'other()'),
+                     suffix.replace('FEATURE', '__slots__'), suffix.replace('(Demo)', '(make_base())')):
+            self.assertIsNone(decide(git_diff(path, source, source + edit), data)[0])
+        data['test_evidence']['sources']['tests/test_reflect.py'] = 'Demo.__subclasses__()'
+        self.assertIsNone(decide(diff, data)[0])
+        data['test_evidence']['sources'].clear()
+        data['classes']['W'].append(cls + '@__init_subclass__')
+        self.assertIsNone(decide(diff, data)[0])

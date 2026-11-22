@@ -14,7 +14,7 @@ from pathlib import Path
 from impact import changed_files, git_diff_text
 from semantic import without_docstrings, classify_change, literal_generator_override, statement_spans
 from predicate import comparison_swap
-from structural import literal_binding, terminal_assertion
+from structural import literal_binding, terminal_assertion, passive_generator_class
 from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
                      week_offset_edit, week_offset_sites)
 
@@ -808,10 +808,81 @@ def generator_override_tests(data, path, old, new):
     return tests_of(evidence['R'].get(cls)) or None
 
 
+def pinned_mentions(data, name):
+    return any(name in source for sources in (data['sources'], data['test_evidence']['sources'])
+               for source in sources.values())
+
+
+def entrypoint_tests(diff, data):
+    # In this pin the root __main__ belongs to the CLI. The numbered suite
+    # imports the library or runs Python with -c, and does not enumerate root modules.
+    path = 'sqlglot/__main__.py'
+    original = data['sources'].get(path)
+    if data.get('pin') != PIN or original is None or 'test_evidence' not in data:
+        return None
+    hits = data['hits']
+    if any(key.startswith(path + '::') and values for key, values in hits.items()):
+        return None
+    diff = git_diff_text(diff)
+    header = f'diff --git a/{path} b/'
+    if not diff.startswith(header):
+        return None
+    rename = re.fullmatch(re.escape(header) + r'(sqlglot/_[a-z][a-z0-9_]*\.py)\n'
+                          r'similarity index 100%\nrename from ' + re.escape(path) + r'\nrename to \1\n', diff)
+    if rename:
+        target = rename[1]
+        if (target in data['sources'] or any(p.startswith(target[:-3] + '/') for p in data['sources'])
+                or pinned_mentions(data, target.split('/')[-1][:-3])):
+            return None
+    else:
+        deletion = re.match(re.escape(header + path + '\n') + r'deleted file mode 100644\n'
+                            r'(?:index [0-9a-f]+\.\.0+\n)?'
+                            + re.escape(f'--- a/{path}\n+++ /dev/null\n'), diff)
+        reconstructed = (header + path + f'\n--- a/{path}\n+++ b/{path}\n' + diff[deletion.end():]
+                         if deletion else diff)
+        try:
+            new = apply_patch(reconstructed, {path: original})[path]
+            if not deletion:
+                compile(new.encode('utf-8'), path, 'exec', dont_inherit=True)
+        except (SyntaxError, ValueError, IndexError):
+            return None
+        if deletion and new:
+            return None
+    chosen = set(hits.get(path, ())) | set(hits.get('!untraced', ()))
+    chosen.update(data.get('line_evidence', {}).get('extra', ()))
+    return None if -1 in chosen else {data['ids'][i] for i in chosen}
+
+
+def passive_generator_tests(data, path, old, new):
+    root = 'sqlglot/generator.py'
+    evidence = data.get('classes')
+    if (data.get('pin') != PIN or not path.startswith('sqlglot/generators/')
+            or not evidence or root not in data['sources'] or 'test_evidence' not in data):
+        return None
+    addition = passive_generator_class(old, new, data['sources'][root])
+    if not addition or any(pinned_mentions(data, name) for name in (addition[0], '__subclasses__')):
+        return None
+    base = path + '::' + addition[1]
+    parent = root + '::Generator'
+    children, _ = class_index(evidence)
+    if evidence['M'].get(base) != [parent] or children.get(base) or evidence['M'].get(parent) != []:
+        return None
+    if any(key in evidence['W'] for cls in (base, parent)
+           for key in (cls + '@__init_subclass__', cls + '@__bases__', cls + '@__dict__')):
+        return None
+    if any(cls + '@__dict__' in evidence['I'] for cls in (base, parent)):
+        return None
+    return tests_of(evidence['R'].get(base)) or None
+
+
 def decide(diff, data, mode='scope'):
     """Return stable IDs, or None to invoke full-suite fallback."""
     if data is None:
         return None, 'catalog'
+    if mode == 'scope' and diff.startswith('diff --git a/sqlglot/__main__.py b/'):
+        found = entrypoint_tests(diff, data)
+        if found is not None:
+            return found, 'entrypoint'
     structural = data.get('structural_evidence', {})
     sources = data['sources']
     test_sources = structural.get('tests', {})
@@ -912,6 +983,13 @@ def decide(diff, data, mode='scope'):
                             configuration_reason = 'module_scalar'
                             continue
                 if mode == 'scope' and len(updates) == 1 and not change.get('class_attributes'):
+                    passive = passive_generator_tests(data, path, original, new)
+                    if passive is not None:
+                        chosen.update(passive)
+                        chosen.update(hits.get(path + '::@importers', ()))
+                        chosen.update(data.get('line_evidence', {}).get('extra', ()))
+                        configuration_reason = 'passive_generator_class'
+                        continue
                     override = generator_override_tests(data, path, original, new)
                     if override is not None:
                         chosen.update(override)

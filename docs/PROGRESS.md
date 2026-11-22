@@ -932,3 +932,82 @@ import-error classification is covered by a regression test. The order
 counterexample is exercised directly in the isolated runner as well as
 the full suite. The existing artifact audit was updated for the first
 production stage and tested against the experimental sibling.
+
+## Phase 15 ranked structural fallbacks
+
+Started from 2c3f08541e1162a1d07c18eac358e0ffa823adab. Native restricted
+Docker reproduced 129.530 public and 370.546 holdout CI seconds, zero
+misses, and five holdout full-suite fallbacks. Median CPU was 1.255 and
+1.133 seconds respectively. The dated official track cutoff is
+November 23 at 00:00 Singapore time. The SHA behind the reported
+272-second official result was unavailable.
+
+Run tools/generalization.py score --split HOLDOUT_OR_DEV_OR_VALIDATION
+--attribution to rank complete cases by the CI gap to scheduling only
+the failing IDs with the same LPT scheduler. The report includes all
+failing parent IDs, leave-one-out marginal CI savings and inconclusive
+case status. Development reports are kept outside the image.
+
+The three largest holdout gaps were CLI deletion, CLI rename, and a
+private generator subclass addition. Each cost 36.817 seconds and
+had zero failures in full-suite labels. The CLI-only checkpoint accepts
+validated changes to the pinned package entrypoint, including complete
+deletion and a fresh private root-module rename with unchanged bytes.
+All raw readers and uncertain tests are retained. The numbered pinned
+suite does not execute the CLI or enumerate root package files.
+The doctest-only package walk is outside the numbered catalog.
+
+CLI-only restricted Docker reduced holdout CI to 301.708 seconds in
+three identical runs at 1.359 seconds median CPU, with zero misses.
+The four fresh Phase 15 mutations scored 78.430 seconds at 0.338 seconds
+median CPU before the private subclass rule. No evidence files changed.
+
+### Phase 15 candidate
+
+The second rule recognizes an appended private subclass of an observed
+direct leaf Generator with unchanged preceding source and a passive
+class body. It rejects evaluated defaults, hooks, decorators, unknown
+bases, existing or referenced names, and observable namespace changes.
+It retains the base receivers, importers, raw readers and uncertain
+tests. The final review noted that dunder import reads are incompletely
+traced, so subclass enumeration is guarded directly against pinned
+source and test text. Neither rule executes any candidate tests.
+
+| Restricted Linux/amd64 | Holdout CI | Median CPU | Total | Full fallbacks | Misses |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Starting tree | 370.546 | 1.133 | 371.679 | 5 | 0 |
+| CLI only | 301.708 | 1.359 | 303.067 | 3 | 0 |
+| CLI and private class | 275.577 | 1.419 | 276.996 | 2 | 0 |
+
+The holdout retained all 805 failing parent IDs. The public CI result
+remained 129.530 seconds with byte-identical selection and zero misses.
+Median public CPU was 1.123 seconds. Peak observed RSS was 123028 KiB.
+Both Make targets passed. Three restricted runs each on the public,
+holdout, six Phase 12 validation, three Phase 14 and four Phase 15
+cases had identical output and zero misses. The existing 14 complete
+development labels retained all failures and the separate trie
+collection-error case remains inconclusive.
+
+Category ablations use three restricted runs per identical labeled group.
+The listed CPU includes selector startup, so category CPUs are not additive.
+
+| Independently labeled category | Cases | CI before ? after | CPU before ? after | Full before ? after |
+| --- | ---: | ---: | ---: | ---: |
+| CLI deletion | 1 | 36.817 ? 2.398 | 0.288 ? 0.266 | 1 ? 0 |
+| CLI renames | 2 | 73.634 ? 4.796 | 0.276 ? 0.280 | 2 ? 0 |
+| CLI body edit | 1 | 36.817 ? 2.398 | 0.276 ? 0.277 | 1 ? 0 |
+| Private generator additions | 2 | 73.634 ? 19.704 | 0.354 ? 0.625 | 2 ? 0 |
+
+All category runs had zero misses. The new public-name rebind mutation
+remained a full-suite fallback and retained all 18 failing test IDs.
+The whole four-case Phase 15 validation batch scored 50.631 CI seconds
+with 0.469 median CPU. The CLI-only checkpoint is
+a018ddf7455ad9fdca4ef047572019e4f17f8b28.
+
+The remaining holdout fallbacks are an eager dialect import and a
+package default change in sqlglot/__init__.py. The import changes
+initialization order and triggers a subprocess test failure, so it
+needs a stronger import-state proof. The default affects many
+generators, and observed constructor coverage alone would still cost
+29.454 seconds before broader safety guards. Both remain full-suite.
+These local results do not establish a new official score.

@@ -17,10 +17,13 @@ from score import evaluate_run
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('image')
-    parser.add_argument('split', choices=('public', 'holdout', 'dev', 'validation', 'p13', 'p14'))
+    parser.add_argument('split', choices=('public', 'holdout', 'dev', 'validation', 'p13', 'p14', 'p15'))
+    parser.add_argument('--case', action='append', choices=CASES, help='explicit mutation subset')
     parser.add_argument('--mode', default='')
     parser.add_argument('--runs', type=int, default=3)
     args = parser.parse_args()
+    if args.case and args.split == 'public':
+        parser.error('--case is for mutation benchmarks')
     if args.runs < 1:
         parser.error('--runs must be positive')
     catalog_bytes = CATALOG.read_bytes()
@@ -37,7 +40,9 @@ def main():
         else:
             answers, inconclusive = {}, []
             for case, (_, split, _) in CASES.items():
-                if split != args.split:
+                if args.case is not None and case not in args.case:
+                    continue
+                if args.case is None and split != args.split:
                     continue
                 patch, report = REPORTS/f'{case}.patch', REPORTS/f'{case}.json'
                 shutil.copyfile(patch, patches/patch.name)
