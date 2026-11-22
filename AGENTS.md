@@ -10,7 +10,7 @@
   tests, and never forces a full fallback of a multi-file patch. Shared readers,
   failed reconstruction or coding[:=] on lines 1-2 still select all tests. SQL
   fixture comment-only edits still select all tests.
-- Structural edits narrow only when they are class-level assignment values in a
+- Class-level assignment values may narrow in a
   non-core file (not parser.py, generator.py, tokens.py, dialects/dialect.py,
   expressions/core.py or any __init__.py), using traced attribute reads. Import
   reads, class-body reads, runtime class writes and cache-changing readers widen
@@ -18,6 +18,10 @@
   all tests, except reads of a proven unchanged Expr registry key for isolated
   boolean flag changes in a direct leaf Expression class. Literal assignments
   that change type or start evaluating an expression also fall back.
+- One structural exception is an appended literal-return override of an already
+  inherited SQL method in a direct leaf Generator. Follow exact receiver evidence,
+  retain readers, importers and uncertain tests, and fall back on a related
+  reflective import read, class write, subclass or missing evidence.
 - Runtime: offline, read-only, nobody, HOME=/tmp, 64 MB tmp, 2 CPUs, 4 GB RAM,
   max 256 processes, 3 minute timeout (4.5 final), stdout <=2 MB.
 - Build: 4 CPUs, 8 GB, 10 minutes; allowed registries/fixed releases/pinned SQLGlot

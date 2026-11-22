@@ -54,3 +54,20 @@ metadata, complete records in both orders, and audited file reads covering
 every independently observed child execution path. The selector keeps the guard
 if any changed file intersects the footprint. Other evidence can still select
 the same test. Tests that failed in reverse order retain their safety selection.
+
+## Phase 11 generalization
+
+Patch reconstruction uses Git LF framing and preserves CR, non-ASCII line
+separator bytes, and missing-final-newline markers in hunk content. Uniform
+CRLF transport is normalized once. Context, hunk lengths and both coordinates
+must match; a missing newline cannot join two logical lines. Fixture guards
+and unsupported path, rename, copy or mode-change handling still apply.
+
+Generator._build_dispatch merges TRANSFORMS and inherited SQL methods into a
+cache scoped to each exact generator class. A pure literal-return override
+appended at EOF to a direct leaf Generator can be attributed to that class.
+The selector requires an inherited ordinary method and unchanged preceding
+source, checks related import reads and writes, and keeps every observed
+receiver, static test importer, raw source reader and uncertain test.
+Structural changes outside that narrow form can still require the full suite.
+Both rules reuse the pinned indexes and execute no patched code.

@@ -620,3 +620,63 @@ mutation labeling, median selector CPU was 1.565 seconds and peak RSS
 was 88540 KiB. The first two independently completed newline-marker
 mutations saved 9.363 seconds each and retained all 325 failing parent
 IDs across those two runs.
+
+### P11-C generalization candidate
+
+The pinned generator builds a dispatch cache per exact receiver class.
+A plain literal-return _sql override appended to a direct leaf Generator
+can use that receiver's coverage. Source readers, static importers,
+uncertain tests and existing ordering guards stay selected. Related
+import-time reads, attribute writes, subclasses and other structural
+edits keep the usual fallback. No index regeneration or runtime test
+execution was needed.
+
+| Version | Public 30 CI (s) | Public CPU (s) | Holdout 17 CI (s) | Holdout CPU (s) | Holdout full fallbacks | Holdout mean tests |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Phase 10-H | 129.530 | 1.073 | 563.818 | 0.358 | 13 | 1260.88 |
+| P11-B parser | 129.530 | 1.145 | 554.455 | 0.317 | 12 | 1185.06 |
+| P11-C integrated | 129.530 | 1.059 | 500.525 | 0.547 | 10 | 1003.47 |
+
+CPU is the median of three restricted Linux/amd64 runs per dataset and
+image. All public and holdout runs had zero misses. The holdout total
+including CPU is 501.072 seconds, down from 564.176. All three C public
+outputs were identical at 3104 bytes, the holdouts at 74660 bytes, and
+the full independent inputs at 129856 bytes. Peak RSS across those
+candidate runs was 90104 KiB and the longest selector wall time was
+1.166 seconds. Both official Make targets and all 96 unit tests passed
+on the host and in the locked Linux test image.
+
+All 32 generated patches passed Git apply validation against the pinned
+index. The clean label run collected 1620 numbered tests and the one
+organizer skip. Of 32 mutations, 31 completed with all 1083 failing
+parent IDs retained, including 805 across all 17 holdouts. The other
+case, trie_default, had 56 collection errors and used all 1620 tests.
+The 31 labeled cases cost 845.502 seconds versus 944.289 for H. Full
+selections fell from 21 to 16, mean selections from 1137.52 to 902.71.
+The 47 completed earlier mutations also retained all 234 failing IDs.
+The earlier separate Hive collection-error case remains inconclusive.
+
+| Category | Completed cases | Phase 10-H CI (s) | P11-C CI (s) | Saved (s) |
+| --- | ---: | ---: | ---: | ---: |
+| Method added | 4 | 147.268 | 67.207 | 80.061 |
+| Module global | 2 | 73.634 | 73.634 | 0 |
+| Test side | 2 | 73.634 | 73.634 | 0 |
+| Missing final newline | 2 | 73.634 | 54.908 | 18.726 |
+| Control flow | 2 | 50.271 | 50.271 | 0 |
+
+The three narrowed overrides selected 106 SQLite, 33 Dremio and 120
+Oracle candidates. They retained 68, zero and two independently
+observed failures, respectively. The equivalent SQLite override
+inserted before existing class code deliberately used the structural
+fallback. TPC-DS was selected on 26 completed cases by H and 23 by C,
+and actually failed on nine. Both public TPC-DS selections are required
+by the public labels. The largest remaining costs by category on this
+matrix are module globals and test-side edits. Their import-time effects
+and test collection need additional evidence.
+
+P11-A is a39e15c7feb73ed2ed8430d9e3b5a273e1ba2a8e. P11-B is
+2c44bc879b6e7fe552fddd6dc821d03009a3938c. The integrated candidate is
+the commit containing this report on phase11-generalization. This
+designed mutation suite is independent of the public labels. Its
+category frequencies and scores provide no estimate of the private
+practice or final distribution.

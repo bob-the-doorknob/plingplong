@@ -1,6 +1,6 @@
 """Generate, label and score independent pinned-source mutations outside the image."""
 import argparse
-from collections import defaultdict
+from collections import Counter, defaultdict
 import difflib
 import hashlib
 import json
@@ -38,6 +38,8 @@ CASES = {
     'sqlite_class_flag': ('class_constant', 'dev', [('sqlglot/dialects/sqlite.py', 'TYPED_DIVISION = True', 'TYPED_DIVISION = False')]),
     'time_import': ('imports', 'holdout', [('sqlglot/time.py', 'TrieResult, in_trie, new_trie', 'TrieResult, new_trie as in_trie, new_trie')]),
     'trie_default': ('signature', 'dev', [(TRIE, 'trie: t.Optional[dict] = None', 'trie: t.Optional[dict] = False')]),
+    'diff_default': ('signature', 'dev', [('sqlglot/diff.py',
+        '    delta_only: bool = False,\n    **kwargs:', '    delta_only: bool = True,\n    **kwargs:')]),
     'sqlite_override': ('method_added', 'dev', [(SQLITE, '    def trunc_sql(', '    def select_sql(self, expression):\n        return "SELECT 0"\n\n    def trunc_sql(')]),
     'sqlite_tail_override': ('method_added', 'dev', [(SQLITE, '',
         '\n    def select_sql(self, expression):\n        return "SELECT 0"\n')]),
@@ -236,6 +238,10 @@ def summarize(checkout, split):
         decisions.append((case, category, group, patch, selected, reason, packed))
     cpu = time.process_time() - start
     totals = defaultdict(int)
+    costs = Counter()
+    full = Counter()
+    expensive_picks = Counter()
+    expensive = sorted(names, key=lambda name: (-durations_by_id[name], name))[:5]
     for case, category, group, patch, selected, reason, packed in decisions:
         label_path = REPORTS / f'{case}.json'
         label = json.loads(label_path.read_text(encoding='utf-8')) if label_path.exists() else None
@@ -250,37 +256,46 @@ def summarize(checkout, split):
         print(json.dumps(dict(case=case, category=category, split=group,
                               paths=label['paths'] if label else [r[0] for r in CASES[case][2]],
                               label='complete' if complete else 'inconclusive', reason=reason,
-                              errors=label['errors'] if label else [], selected=len(selected),
+                              errors=label['errors'] if label else [], label_exit=label['exit'] if label else None,
+                              selected=len(selected),
                               full=len(selected) == len(names), ci_ms=cost, longest=longest,
-                              longest_marginal_ms=cost-reduced_cost, verification='offline_full_suite',
+                              longest_marginal_ms=cost-reduced_cost, runtime_verification=False,
                               failing=sorted(failures) if complete else None, missed=misses)))
         if complete:
             rows.append(json.dumps(payload))
             answers[case] = {'failing': sorted(lookup[name]['number'] for name in failures)}
             totals[category] += cost
+            costs[category] += 1
+            full[category] += len(selected) == len(names)
+            expensive_picks.update(name for name in expensive if name in selected)
     result = evaluate_run('\n'.join(rows).encode(), catalog['tests'], answers)
     print(json.dumps(dict(result=result, completed=len(rows), scored=len(decisions), missing=missing, cpu_s=cpu,
-                          category_ci_ms=dict(sorted(totals.items())))))
+                          category_ci_ms=dict(sorted(totals.items())), category_counts=dict(costs),
+                          category_full=dict(full), expensive_picks=dict(expensive_picks))))
     return int(bool(missing) or len(rows) != len(decisions) or not result['ok'] or bool(result['missed_commits']))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['list', 'generate', 'label', 'score'])
-    parser.add_argument('case', nargs='?')
+    parser.add_argument('case', nargs='?', choices=['baseline', *CASES])
     parser.add_argument('--checkout', type=Path, default=ROOT)
     parser.add_argument('--split', choices=['dev', 'holdout', 'all'], default='all')
     args = parser.parse_args()
     if args.action == 'list':
         print('\n'.join(['baseline', *CASES]))
     elif args.action == 'generate':
+        if args.case == 'baseline':
+            parser.error('baseline has no patch')
         REPORTS.mkdir(parents=True, exist_ok=True)
-        for case in CASES:
+        for case in [args.case] if args.case else CASES:
             with tempfile.TemporaryDirectory() as tmp, archive() as source:
                 source.extractall(tmp, filter='data')
                 patch, _ = generate(case, Path(tmp))
                 (REPORTS / f'{case}.patch').write_bytes(patch)
     elif args.action == 'label':
+        if not args.case:
+            parser.error('label requires a case name')
         return label(args.case)
     else:
         return summarize(args.checkout, args.split)
