@@ -8,8 +8,8 @@ import re
 import zlib
 from pathlib import Path
 
-from impact import changed_files
-from semantic import classify_change, statement_spans
+from impact import changed_files, git_diff_text
+from semantic import classify_change, literal_generator_override, statement_spans
 from predicate import comparison_swap
 from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
                      week_offset_edit, week_offset_sites)
@@ -18,17 +18,24 @@ PIN = 'eb11aec4be8cb2122afe713a4816662c3f0fb2fa'
 
 
 def apply_patch(diff, sources):
+    diff = git_diff_text(diff)
     paths = changed_files(diff, require_code=False)
     if not paths or not paths <= sources.keys():
         raise ValueError('unknown path, textual edit or unsupported diff')
-    lines = diff.splitlines(keepends=True)
+    # Git frames the diff with LF. Any CR or other separator in a hunk is payload.
+    if not diff.endswith('\n'):
+        raise ValueError('unterminated diff')
+    lines = [line + '\n' for line in diff[:-1].split('\n')]
     i = 0
     patched = {}
     while i < len(lines):
         path = lines[i].split()[2][2:]
         if path in patched or path not in paths:
             raise ValueError('repeated file')
-        original = sources[path].splitlines(keepends=True)
+        *complete, last = sources[path].split('\n')
+        original = [line + '\n' for line in complete]
+        if last:
+            original.append(last)
         result = []
         cursor = 0
         i += 1
@@ -50,6 +57,9 @@ def apply_patch(diff, sources):
             i += 1
             while i < len(lines) and lines[i][0] in ' +-':
                 kind, value = lines[i][0], lines[i][1:]
+                if i + 1 < len(lines) and lines[i+1] == '\\ No newline at end of file\n':
+                    value = value[:-1]
+                    i += 1
                 if kind != '+':
                     if cursor >= len(original) or original[cursor] != value:
                         raise ValueError('context mismatch')
@@ -59,7 +69,10 @@ def apply_patch(diff, sources):
                 i += 1
             if i < len(lines) and not lines[i].startswith(('diff --git ', '@@')):
                 raise ValueError('unsupported hunk trailer')
-        patched[path] = ''.join(result + original[cursor:])
+        result.extend(original[cursor:])
+        if any(not line.endswith('\n') for line in result[:-1]):
+            raise ValueError('missing newline before end of file')
+        patched[path] = ''.join(result)
     return patched
 
 
@@ -330,6 +343,26 @@ def statement_tests(old, new, path, evidence):
     return candidates if -1 not in candidates else None
 
 
+def generator_override_tests(data, path, old, new):
+    """Retain receivers when a leaf generator changes one dispatch slot."""
+    base_path = 'sqlglot/generator.py'
+    evidence = data.get('classes')
+    if not evidence or not path.startswith('sqlglot/generators/') or base_path not in data['sources']:
+        return None
+    override = literal_generator_override(old, new, data['sources'][base_path])
+    if override is None:
+        return None
+    name, method = override
+    cls, base = path + '::' + name, base_path + '::Generator'
+    children, _ = class_index(evidence)
+    if evidence['M'].get(cls) != [base] or children.get(cls):
+        return None
+    keys = tuple(owner + '@' + attr for owner in (cls, base) for attr in (method, '__dict__'))
+    if any(key in evidence['I'] or key in evidence['W'] for key in keys):
+        return None
+    return tests_of(evidence['R'].get(cls)) or None
+
+
 def decide(diff, data, mode='scope'):
     """Return stable IDs, or None to invoke full-suite fallback."""
     if data is None:
@@ -376,6 +409,14 @@ def decide(diff, data, mode='scope'):
                 continue
             code_changed = True
             if change['structural']:
+                if mode == 'scope' and len(updates) == 1 and not change.get('class_attributes'):
+                    override = generator_override_tests(data, path, original, new)
+                    if override is not None:
+                        chosen.update(override)
+                        chosen.update(data.get('line_evidence', {}).get('extra', ()))
+                        chosen.update(hits.get(path + '::@importers', ()))
+                        configuration_reason = 'generator_override'
+                        continue
                 if not change.get('class_attributes') or is_core(path):
                     return None, 'structural_or_text'
                 isolated = len(updates) == 1 and len(change['class_attributes']) == 1 and not change['functions']

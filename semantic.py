@@ -204,6 +204,46 @@ def classify_change(old: str, new: str) -> dict:
     return result
 
 
+def literal_generator_override(old, new, base_source):
+    """Find one added, side-effect-free override of an existing generator method."""
+    if not new.startswith(old):
+        return None
+    before, after = ast.parse(old), ast.parse(new)
+    if not before.body or not after.body:
+        return None
+    a, b = before.body[-1], after.body[-1]
+    if not isinstance(a, ast.ClassDef) or not isinstance(b, ast.ClassDef) or not b.body:
+        return None
+    method = b.body[-1]
+    if (not isinstance(method, ast.FunctionDef) or _bindings(a.body, method.name)
+            or _body_reads(a.body, method.name) or b.decorator_list or b.keywords
+            or [ast.unparse(base) for base in b.bases] != ['generator.Generator']
+            or getattr(b, 'type_params', ()) or not method.name.endswith('_sql')
+            or method.name.startswith('_') or method.decorator_list or method.returns
+            or getattr(method, 'type_params', ()) or len(method.body) != 1):
+        return None
+    args = method.args
+    if ([arg.arg for arg in args.args] != ['self', 'expression'] or args.posonlyargs or args.kwonlyargs
+            or args.vararg or args.kwarg or args.defaults or any(arg.annotation for arg in args.args)):
+        return None
+    statement = method.body[0]
+    if not (isinstance(statement, ast.Return) and isinstance(statement.value, ast.Constant)
+            and type(statement.value.value) is str):
+        return None
+    b.body.remove(method)
+    if ast.dump(before) != ast.dump(after):
+        return None
+    for cls in ast.parse(base_source).body:
+        if (isinstance(cls, ast.ClassDef) and cls.name == 'Generator'
+                and not (cls.bases or cls.decorator_list or cls.keywords)):
+            if _bindings(cls.body, '__init_subclass__'):
+                return None
+            if any(isinstance(m, ast.FunctionDef) and m.name == method.name and not m.decorator_list
+                   for m in cls.body):
+                return b.name, method.name
+    return None
+
+
 def _boolean_operands(node):
     if isinstance(node, ast.BoolOp):
         return [operand for value in node.values for operand in _boolean_operands(value)]

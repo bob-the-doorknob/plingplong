@@ -55,6 +55,13 @@ def build_index(root: Path) -> dict:
     return {'files': modules, 'reverse': {m: sorted(users) for m, users in sorted(reverse.items())}, 'complete': complete}
 
 
+def git_diff_text(diff):
+    """Undo uniform CRLF transport without stripping CR from Git hunk payloads."""
+    if diff.partition('\n')[0].endswith('\r') and diff.count('\r\n') == diff.count('\n'):
+        return diff.replace('\r\n', '\n')
+    return diff
+
+
 def changed_files(diff: str, require_code: bool = True) -> set[str] | None:
     """Accept ordinary same-path textual Git diffs; everything else falls back.
 
@@ -62,7 +69,9 @@ def changed_files(diff: str, require_code: bool = True) -> set[str] | None:
     '#' also falls back. The hybrid selector disables this textual check and
     decides comment-only edits on the AST instead.
     """
-    lines = diff.splitlines()
+    lines = git_diff_text(diff).split('\n')
+    if lines[-1] == '':
+        lines.pop()
     paths, changed = set(), []
     i = 0
     while i < len(lines):

@@ -32,6 +32,27 @@ Generate the two optional narrowing indexes with the same archive and image:
 
 For independent mutations run the container with command `python /repo/tools/mutate.py <case>`, where the case is `function`, `fixture`, `lambda`, `nested`, `block_fixture` or one of the `comment_*`, `attr_*`, `base_*` and `registry_*` cases listed in tools/mutate.py, and environment `-e SKIP_INTEGRATION=0 -e OPENBLAS_NUM_THREADS=1`. Give each run at least 3.5 GB of memory; 2 GB is killed. Mutated suites are expected to fail. Then run `python tools/check_mutations.py`. The reports and generated diffs stay in .phase5/ outside the submission image.
 
+## Independent generalization benchmark
+
+Use the same pinned archive and locked trace image from the preceding section.
+Run the frozen cases in a Linux shell. Pytest exit 1 is expected for a mutation
+that breaks tests.
+
+    python tools/generalization.py list | while IFS= read -r case; do
+        docker run --rm --platform linux/amd64 --network none --cpus 3 --memory 3600m \
+            -e OPENBLAS_NUM_THREADS=1 -v "$PWD:/repo" phase5-trace \
+            python /repo/tools/generalization.py label "$case"
+    done
+    python tools/generalization.py score --split dev
+    python tools/generalization.py score --split holdout
+
+Use --checkout with the path of a baseline worktree to compare the same frozen
+cases. Each label run starts from the pinned archive. The scorer emits per-case
+selection, cost, marginal cost of the longest test and missed parent IDs. It
+returns nonzero if any labels are missing, inconclusive or missed. Completed
+cases still receive a separate aggregate. Generated patches and labels live
+under .phase5/generalization and are excluded from the production build.
+
 ## Submission
 
 Use the public repository https://github.com/bob-the-doorknob/plingplong and the full validated commit SHA at the [official track](https://www.joinbuilders.org/buildathon/tracks/blast-radius). The accepted all-tests revision is `205133366ef9ed2be41a56ac606a51b5d5ac6d5e`.

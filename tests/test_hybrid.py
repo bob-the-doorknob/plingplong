@@ -9,6 +9,39 @@ class Reconstruction(unittest.TestCase):
             with self.assertRaises(ValueError):
                 apply_patch(bad, {'x':'a\nb\nc\n'})
 
+    def test_git_lf_framing_preserves_payload_bytes(self):
+        prefix = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n'
+        for before, after, body in [
+            ('a\n', 'b', '-a\n+b\n\\ No newline at end of file\n'),
+            ('a', 'b\n', '-a\n\\ No newline at end of file\n+b\n'),
+            ('a', 'b', '-a\n\\ No newline at end of file\n+b\n\\ No newline at end of file\n'),
+            ('a\n', 'b\r\n', '-a\n+b\r\n'),
+            ('a\f1\n', 'b\x851\n', '-a\f1\n+b\x851\n'),
+        ]:
+            with self.subTest(before=before, after=after):
+                self.assertEqual(apply_patch(prefix + body, {'x': before}), {'x': after})
+
+    def test_uniform_crlf_transport_preserves_crlf_payload(self):
+        patch = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\r\n'
+        self.assertEqual(apply_patch(patch.replace('\n', '\r\n'), {'x': 'a\n'}), {'x': 'b\r\n'})
+        mixed = patch.replace(' b/x\n', ' b/x\r\n', 1)
+        with self.assertRaises(ValueError):
+            apply_patch(mixed, {'x': 'a\n'})
+
+    def test_missing_newline_context_has_to_be_at_end(self):
+        prefix = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n'
+        marker = '\\ No newline at end of file\n'
+        patch = prefix + '@@ -1,2 +1,2 @@\n-a\n+b\n z\n' + marker
+        self.assertEqual(apply_patch(patch, {'x': 'a\nz'}), {'x': 'b\nz'})
+        for body in [
+            '@@ -1 +1 @@\n-a\n+b\n' + marker,
+            '@@ -1 +1 @@\n-a\n+b\n' + marker + marker,
+            '@@ -1 +1 @@\n' + marker + '-a\n+b\n',
+            '@@ -1 +1 @@\n-a\n+b',
+        ]:
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                apply_patch(prefix + body, {'x': 'a\nz\n'})
+
     def test_sql_comment_and_spacing_fall_back(self):
         for old,new in [('-- abc','-- def'),('SELECT 1','SELECT   1')]:
             path='tests/fixtures/example.sql'
@@ -54,11 +87,62 @@ class FixtureComments(unittest.TestCase):
 
 def git_patch(changes):
     import difflib
+    from io import StringIO
     out = []
     for path, (old, new) in changes.items():
         out.append(f'diff --git a/{path} b/{path}\n')
-        out.extend(difflib.unified_diff(old.splitlines(True), new.splitlines(True), 'a/' + path, 'b/' + path))
+        out.extend(difflib.unified_diff(StringIO(old).readlines(), StringIO(new).readlines(), 'a/' + path, 'b/' + path))
     return ''.join(out)
+
+
+class GeneratorOverride(unittest.TestCase):
+    PATH = 'sqlglot/generators/toy.py'
+    BASE = 'sqlglot/generator.py'
+    OLD = 'from sqlglot import generator\n\nclass Toy(generator.Generator):\n    CONFIG = True\n'
+    METHOD = '    def select_sql(self, expression):\n        return "SELECT 0"\n'
+
+    def data(self):
+        cls, base = self.PATH + '::Toy', self.BASE + '::Generator'
+        return {
+            'sources': {self.PATH: self.OLD, self.BASE: 'class Generator:\n    def select_sql(self, expression):\n        return ""\n'},
+            'ids': ['receiver', 'reader', 'other', 'importer'],
+            'hits': {self.PATH: [1], self.PATH + '::@importers': [3]},
+            'classes': {'M': {cls: [base], base: []}, 'R': {cls: [0]}, 'I': {}, 'W': []},
+        }
+
+    def test_pure_override_keeps_receivers_readers_and_importers(self):
+        patch = git_patch({self.PATH: (self.OLD, self.OLD + self.METHOD)})
+        self.assertEqual(decide(patch, self.data()), ({'receiver', 'reader', 'importer'}, 'generator_override'))
+
+    def test_observed_import_or_subclass_keeps_full_suite(self):
+        patch = git_patch({self.PATH: (self.OLD, self.OLD + self.METHOD)})
+        cls = self.PATH + '::Toy'
+        base = self.BASE + '::Generator'
+        for key in (cls + '@__dict__', base + '@select_sql'):
+            data = self.data()
+            data['classes']['I'][key] = ['<module>']
+            self.assertIsNone(decide(patch, data)[0])
+        data = self.data()
+        data['classes']['M']['other::Child'] = [cls]
+        self.assertIsNone(decide(patch, data)[0])
+
+    def test_mutation_and_edits_before_end_keep_full_suite(self):
+        patch = git_patch({self.PATH: (self.OLD, self.OLD + self.METHOD)})
+        data = self.data()
+        data['classes']['W'].append(self.PATH + '::Toy@select_sql')
+        self.assertIsNone(decide(patch, data)[0])
+        middle = self.OLD.replace('    CONFIG = True\n', self.METHOD + '    CONFIG = True\n')
+        patch = git_patch({self.PATH: (self.OLD, middle)})
+        self.assertIsNone(decide(patch, self.data())[0])
+
+    def test_unknown_bindings_and_nonliteral_bodies_keep_full_suite(self):
+        for method in (self.METHOD.replace('select_sql', 'where_sql'),
+                       self.METHOD.replace('"SELECT 0"', 'other()'),
+                       self.METHOD.replace('expression)', 'expression=None)'),
+                       '    @staticmethod\n' + self.METHOD):
+            with self.subTest(method=method):
+                patch = git_patch({self.PATH: (self.OLD, self.OLD + method)})
+                self.assertIsNone(decide(patch, self.data())[0])
 
 
 class CommentOnly(unittest.TestCase):
