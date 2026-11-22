@@ -699,3 +699,17 @@ selected 1620. All three restricted runs on the 17 holdouts scored 500.525
 simulated seconds with zero misses. Production rules are active locally.
 The organizer's receipts and private decisions could not be verified.
 The identical 334.724-second official simulated totals remain unexplained.
+
+## Phase 12-A module scalar reads
+
+The static packer derives exact direct function readers of a scalar
+from the pinned source and binds the certificate to the original
+coverage digest and organizer catalog. The original and patched AST
+must differ only in one same-type immutable assignment value. Imported
+aliases, import-time and nested captures, reflective namespaces and
+unresolved readers keep the full selection. The pinned certificate
+currently covers nine serde bindings. The public and frozen holdout
+simulated scores stayed 129.530 and 500.525 seconds with zero misses
+in Docker. The existing serde development case and two fresh scalar
+validation cases each saved 9.363 seconds. All 71 failing parent IDs
+from those three cases were retained.

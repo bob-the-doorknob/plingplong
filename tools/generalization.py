@@ -70,6 +70,22 @@ CASES = {
 }
 
 
+# Separate validation cases preserve the frozen Phase 11 holdout.
+PHASE12 = {
+    'serde_meta_scalar': ('module_global', 'validation', [(SERDE, 'META = "m"', 'META = "c"')]),
+    'serde_type_scalar': ('module_global', 'validation', [(SERDE, 'TYPE = "t"', 'TYPE = "v"')]),
+    'error_underline_scalar': ('module_global', 'validation', [('sqlglot/errors.py',
+        'ANSI_UNDERLINE = "\\033[4m"', 'ANSI_UNDERLINE = "\\033[8m"')]),
+    'test_tail_literal': ('test_side', 'validation', [(TIME_TEST,
+        'self.assertEqual(format_time("da", mapping), "db")',
+        'self.assertEqual(format_time("da", mapping), "bad")')]),
+    'test_tail_int': ('test_side', 'validation', [(TIME_TEST,
+        'self.assertEqual(0, subsecond_precision("garbage"))',
+        'self.assertEqual(1, subsecond_precision("garbage"))')]),
+}
+CASES.update(PHASE12)
+
+
 def digest(payload):
     return hashlib.sha256(payload).hexdigest()
 
@@ -280,7 +296,7 @@ def main():
     parser.add_argument('action', choices=['list', 'generate', 'label', 'score'])
     parser.add_argument('case', nargs='?', choices=['baseline', *CASES])
     parser.add_argument('--checkout', type=Path, default=ROOT)
-    parser.add_argument('--split', choices=['dev', 'holdout', 'all'], default='all')
+    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'all'], default='all')
     args = parser.parse_args()
     if args.action == 'list':
         print('\n'.join(['baseline', *CASES]))

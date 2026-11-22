@@ -11,6 +11,7 @@ from pathlib import Path
 from impact import changed_files, git_diff_text
 from semantic import classify_change, literal_generator_override, statement_spans
 from predicate import comparison_swap
+from structural import literal_binding
 from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
                      week_offset_edit, week_offset_sites)
 
@@ -311,7 +312,8 @@ def load(tests):
         data = json.loads(gzip.decompress(base))
         if data['schema'] == 1 and data['pin'] == PIN and sorted(t['id'] for t in tests) == data['ids']:
             digest = hashlib.sha256(base).hexdigest()
-            for filename, key in (('lines.gz', 'line_evidence'), ('predicates.gz', 'predicate_evidence')):
+            for filename, key in (('lines.gz', 'line_evidence'), ('predicates.gz', 'predicate_evidence'),
+                                  ('structural.gz', 'structural_evidence')):
                 try:
                     auxiliary = json.loads(gzip.decompress(Path(__file__).with_name(filename).read_bytes()))
                     if (auxiliary['version'] == 1 and auxiliary['pin'] == PIN and auxiliary['ids'] == data['ids']
@@ -409,6 +411,18 @@ def decide(diff, data, mode='scope'):
                 continue
             code_changed = True
             if change['structural']:
+                if mode == 'scope' and len(updates) == 1 and not is_core(path):
+                    bindings = data.get('structural_evidence', {}).get('globals', {}).get(path, {})
+                    readers = bindings.get(literal_binding(original, new)) if bindings else None
+                    if readers:
+                        keys = [path + '::' + reader for reader in readers]
+                        if all(hits.get(key) for key in keys):
+                            for key in keys:
+                                chosen.update(hits[key])
+                            chosen.update(hits.get(path + '::@importers', ()))
+                            chosen.update(data.get('line_evidence', {}).get('extra', ()))
+                            configuration_reason = 'module_scalar'
+                            continue
                 if mode == 'scope' and len(updates) == 1 and not change.get('class_attributes'):
                     override = generator_override_tests(data, path, original, new)
                     if override is not None:
