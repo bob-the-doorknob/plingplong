@@ -605,3 +605,18 @@ scores with the official scorer. It freezes development and holdout
 cases. Missing reports, timeouts, collection errors and unexpected skips
 are inconclusive. Ground-truth labels and generated patches remain in
 .phase5, outside the production image.
+
+### P11-B: exact Git text reconstruction
+
+Changed-file detection and application use LF as Git's line delimiter.
+CRLF payload and missing-final-newline markers are preserved. Uniform CRLF
+transport is distinguished from payload. Invalid framing and context still
+fall back. Both changes are general patch-format support.
+
+The parser-only staged tree passed 92 unit tests and both Make targets.
+The public score stayed at 129.530 seconds with zero misses. Three
+restricted runs emitted identical 3104-byte outputs. Under concurrent
+mutation labeling, median selector CPU was 1.565 seconds and peak RSS
+was 88540 KiB. The first two independently completed newline-marker
+mutations saved 9.363 seconds each and retained all 325 failing parent
+IDs across those two runs.

@@ -8,7 +8,7 @@ import re
 import zlib
 from pathlib import Path
 
-from impact import changed_files
+from impact import changed_files, git_diff_text
 from semantic import classify_change, statement_spans
 from predicate import comparison_swap
 from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
@@ -18,17 +18,24 @@ PIN = 'eb11aec4be8cb2122afe713a4816662c3f0fb2fa'
 
 
 def apply_patch(diff, sources):
+    diff = git_diff_text(diff)
     paths = changed_files(diff, require_code=False)
     if not paths or not paths <= sources.keys():
         raise ValueError('unknown path, textual edit or unsupported diff')
-    lines = diff.splitlines(keepends=True)
+    # Git frames the diff with LF. Any CR or other separator in a hunk is payload.
+    if not diff.endswith('\n'):
+        raise ValueError('unterminated diff')
+    lines = [line + '\n' for line in diff[:-1].split('\n')]
     i = 0
     patched = {}
     while i < len(lines):
         path = lines[i].split()[2][2:]
         if path in patched or path not in paths:
             raise ValueError('repeated file')
-        original = sources[path].splitlines(keepends=True)
+        *complete, last = sources[path].split('\n')
+        original = [line + '\n' for line in complete]
+        if last:
+            original.append(last)
         result = []
         cursor = 0
         i += 1
@@ -50,6 +57,9 @@ def apply_patch(diff, sources):
             i += 1
             while i < len(lines) and lines[i][0] in ' +-':
                 kind, value = lines[i][0], lines[i][1:]
+                if i + 1 < len(lines) and lines[i+1] == '\\ No newline at end of file\n':
+                    value = value[:-1]
+                    i += 1
                 if kind != '+':
                     if cursor >= len(original) or original[cursor] != value:
                         raise ValueError('context mismatch')
@@ -59,7 +69,10 @@ def apply_patch(diff, sources):
                 i += 1
             if i < len(lines) and not lines[i].startswith(('diff --git ', '@@')):
                 raise ValueError('unsupported hunk trailer')
-        patched[path] = ''.join(result + original[cursor:])
+        result.extend(original[cursor:])
+        if any(not line.endswith('\n') for line in result[:-1]):
+            raise ValueError('missing newline before end of file')
+        patched[path] = ''.join(result)
     return patched
 
 

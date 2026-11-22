@@ -42,7 +42,7 @@ def main() -> None:
     evidence = load(tests)
     for patch in sorted((DATA / 'commits').glob('*.patch')):
         try:
-            ids, reason = decide(patch.read_text(encoding='utf-8'), evidence)
+            ids, reason = decide(patch.read_bytes().decode('utf-8'), evidence)
         except (UnicodeError, OSError, RecursionError):
             ids, reason = None, 'unreadable_patch'
         selected = workers if ids is None else schedule([t for t in tests if t['id'] in ids])

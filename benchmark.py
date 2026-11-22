@@ -28,7 +28,7 @@ def main():
         breakdown = []
         rows, counts, reasons = [], [], Counter()
         for patch in sorted((SAMPLE/'commits').glob('*.patch')):
-            ids, reason = (None,'baseline') if mode == 'all' else decide(patch.read_text(encoding='utf-8'),evidence,mode)
+            ids, reason = (None,'baseline') if mode == 'all' else decide(patch.read_bytes().decode('utf-8'),evidence,mode)
             workers = full if ids is None else selector.schedule([t for t in tests if t['id'] in ids])
             if ids is None:
                 reasons[reason] += 1
@@ -57,7 +57,7 @@ def main():
                     reduced = max((sum(durations[n] for n in w) for w in revised), default=0) + 2000 * len(revised)
                     marginal.append((by_number[number]['id'], cost - reduced))
                 print(f'  marginal_ms={marginal}')
-                diff = (SAMPLE/'commits'/f'{commit}.patch').read_text(encoding='utf-8')
+                diff = (SAMPLE/'commits'/f'{commit}.patch').read_bytes().decode('utf-8')
                 try:
                     sources = apply_patch(diff, evidence['sources'])
                 except ValueError:

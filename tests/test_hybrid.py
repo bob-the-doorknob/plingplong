@@ -9,6 +9,39 @@ class Reconstruction(unittest.TestCase):
             with self.assertRaises(ValueError):
                 apply_patch(bad, {'x':'a\nb\nc\n'})
 
+    def test_git_lf_framing_preserves_payload_bytes(self):
+        prefix = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n'
+        for before, after, body in [
+            ('a\n', 'b', '-a\n+b\n\\ No newline at end of file\n'),
+            ('a', 'b\n', '-a\n\\ No newline at end of file\n+b\n'),
+            ('a', 'b', '-a\n\\ No newline at end of file\n+b\n\\ No newline at end of file\n'),
+            ('a\n', 'b\r\n', '-a\n+b\r\n'),
+            ('a\f1\n', 'b\x851\n', '-a\f1\n+b\x851\n'),
+        ]:
+            with self.subTest(before=before, after=after):
+                self.assertEqual(apply_patch(prefix + body, {'x': before}), {'x': after})
+
+    def test_uniform_crlf_transport_preserves_crlf_payload(self):
+        patch = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\r\n'
+        self.assertEqual(apply_patch(patch.replace('\n', '\r\n'), {'x': 'a\n'}), {'x': 'b\r\n'})
+        mixed = patch.replace(' b/x\n', ' b/x\r\n', 1)
+        with self.assertRaises(ValueError):
+            apply_patch(mixed, {'x': 'a\n'})
+
+    def test_missing_newline_context_has_to_be_at_end(self):
+        prefix = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n'
+        marker = '\\ No newline at end of file\n'
+        patch = prefix + '@@ -1,2 +1,2 @@\n-a\n+b\n z\n' + marker
+        self.assertEqual(apply_patch(patch, {'x': 'a\nz'}), {'x': 'b\nz'})
+        for body in [
+            '@@ -1 +1 @@\n-a\n+b\n' + marker,
+            '@@ -1 +1 @@\n-a\n+b\n' + marker + marker,
+            '@@ -1 +1 @@\n' + marker + '-a\n+b\n',
+            '@@ -1 +1 @@\n-a\n+b',
+        ]:
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                apply_patch(prefix + body, {'x': 'a\nz\n'})
+
     def test_sql_comment_and_spacing_fall_back(self):
         for old,new in [('-- abc','-- def'),('SELECT 1','SELECT   1')]:
             path='tests/fixtures/example.sql'
@@ -54,10 +87,11 @@ class FixtureComments(unittest.TestCase):
 
 def git_patch(changes):
     import difflib
+    from io import StringIO
     out = []
     for path, (old, new) in changes.items():
         out.append(f'diff --git a/{path} b/{path}\n')
-        out.extend(difflib.unified_diff(old.splitlines(True), new.splitlines(True), 'a/' + path, 'b/' + path))
+        out.extend(difflib.unified_diff(StringIO(old).readlines(), StringIO(new).readlines(), 'a/' + path, 'b/' + path))
     return ''.join(out)
 
 
