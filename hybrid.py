@@ -891,7 +891,8 @@ def decide(diff, data, mode='scope'):
                 # Comment or layout only: bytecode differs at most in line numbers,
                 # so only tests that read this source as text can observe it.
                 continue
-            if mode == 'scope' and without_docstrings(original) == without_docstrings(new):
+            if (mode == 'scope' and change['structural']
+                    and without_docstrings(original) == without_docstrings(new)):
                 # Pinned sqlglot reads docstrings only to keep an Expr class's own __doc__,
                 # and no collected test reads __doc__; treat docstring text like comments.
                 continue
