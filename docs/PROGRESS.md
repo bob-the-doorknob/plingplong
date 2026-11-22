@@ -680,3 +680,22 @@ the commit containing this report on phase11-generalization. This
 designed mutation suite is independent of the public labels. Its
 category frequencies and scores provide no estimate of the private
 practice or final distribution.
+
+## Phase 12-0 local submission audit
+
+Fetched main at 85b96c0, whose tree matches 62aecb11129a55406739ea271d5e354a4cb3a227.
+A clean linux/amd64 Docker build from git -c core.autocrlf=false archive
+at that SHA matched every production Python and evidence blob by SHA-256.
+The first archive used host CRLF conversion on Python files. Rebuilding
+without conversion removed the byte differences. The verified image
+uses Python 3.13.18 and is sha256:2a9e99979fb092dae94616be3a17bff8e83902288eff0a20ef43eab6e4fe505f.
+Use tools/provenance.py COMMIT IMAGE DIAGNOSTIC_PATCH_DIRECTORY to repeat
+the digest audit with production limits and inputs mounted read-only.
+
+The diagnostic output digest is b2f4f65867dce129343cf8dbb1ceb98d04b5a85059974cbc3a804db83c966cab.
+The newline case selected 331 tests. The three supported generator
+overrides selected 33, 106 and 120, while the unsupported structural edit
+selected 1620. All three restricted runs on the 17 holdouts scored 500.525
+simulated seconds with zero misses. Production rules are active locally.
+The organizer's receipts and private decisions could not be verified.
+The identical 334.724-second official simulated totals remain unexplained.
