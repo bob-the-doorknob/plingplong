@@ -92,6 +92,7 @@ REPLACEMENTS.update({
 REPLACEMENTS.update({
     'boolean_guard_canonicalize': [('sqlglot/optimizer/canonicalize.py', 'if isinstance(node, exp.Add) and node.type and node.type.this in exp.DataType.TEXT_TYPES:', 'if isinstance(node, exp.Add) and node.type or node.type.this in exp.DataType.TEXT_TYPES:')],
 })
+REPLACEMENTS['direct_child_eager_import'] = [('sqlglot/__init__.py', 'pretty = False\n', 'from sqlglot.dialects import snowflake\n\npretty = False\n')]
 REPLACEMENTS['comment_mixed'] = REPLACEMENTS['function']
 
 

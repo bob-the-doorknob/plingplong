@@ -36,3 +36,21 @@ about the equivalence of mutable containers. General import instrumentation
 would need source-attributed readers for the changed state, including lazy
 imports and cached aliases. The existing offline traces also retain uncertainty
 around source read caches and child processes.
+
+## Phase 10 precision and process attribution
+
+The optional line map is tied to the pinned evidence digest and organizer IDs.
+It uses the original span for supported literal, operator, and Boolean
+regrouping edits. Unmapped or shared spans keep function coverage. Spawned pool
+tasks carry the submitting test ID, and setup and teardown stay file-wide.
+The comparison map records agreement for native identity and equality operators
+in both suite orders. Unknown values, shared reads, and other semantic edits
+keep the ordinary candidates. The tokenizer radix and week-offset rules are
+limited to the audited value readers present at the pinned revision.
+
+A direct Python subprocess footprint can narrow its historical blanket
+selection. The collector requires successful exit, matching launch and startup
+metadata, complete records in both orders, and audited file reads covering
+every independently observed child execution path. The selector keeps the guard
+if any changed file intersects the footprint. Other evidence can still select
+the same test. Tests that failed in reverse order retain their safety selection.

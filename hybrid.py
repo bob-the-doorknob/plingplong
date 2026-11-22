@@ -340,6 +340,11 @@ def decide(diff, data, mode='scope'):
         return None, 'unsupported_diff'
     hits = data['hits']
     chosen = set(hits.get('!untraced', []))
+    if mode == 'scope':
+        direct = data.get('line_evidence', {}).get('certified_direct_children', {})
+        for index, footprint in direct.items():
+            if updates.keys().isdisjoint(footprint):
+                chosen.discard(int(index))
     code_changed = False
     statement_selected = False
     predicate_selected = False

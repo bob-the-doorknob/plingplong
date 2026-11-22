@@ -13,3 +13,7 @@ if os.environ.get("BR_LABELED_POOL") == "1":
     from concurrent.futures import ProcessPoolExecutor
     from trace_predicates import labeled_submit
     ProcessPoolExecutor.submit = labeled_submit(ProcessPoolExecutor.submit)
+
+if os.environ.get("BR_DIRECT_TRACE") == "1":
+    import trace_direct_children
+    trace_direct_children.start()
