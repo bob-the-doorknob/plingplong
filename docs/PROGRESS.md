@@ -850,3 +850,19 @@ runs each): public 129.530 s with 1.346 s median CPU; holdout 370.546 s with
 1.098 s; P13 set 266.793 s with 1.824 s. The P13 set includes the inconclusive
 BigQuery case, which selects the full suite. make sample and make check passed.
 Labeled misses across public, holdout, dev, validation, P13 and the survey: zero.
+
+## Phase 14 baseline and execution ledger
+
+Started on phase14-hybrid-verifier at e159d77936670dd794626f0a4f4e9ecc7d9967f7.
+The merged tree equals 27401f6. The 120 project tests, make sample, and
+make check passed. Three restricted native amd64 runs returned 129.530
+public and 370.546 holdout simulated seconds, with zero misses. Median
+CPU was 1.198 and 1.188 seconds respectively. Peak RSS was 122252 KiB.
+Public TPC-DS selections alone had marginal CI costs of 13.031 and
+18.026 seconds. Existing labels show both selections are required.
+
+Execution order is bounded candidate runner, TPC handoff probe, import-state
+comparison, then integrated ablation and review. Ruling: keep experimental
+execution out of the default image until passing results justify exclusion.
+The shared interface is validated same-path edits and the original
+candidate set, with incomplete evidence always retaining candidates.
