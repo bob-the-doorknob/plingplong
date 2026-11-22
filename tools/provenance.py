@@ -9,11 +9,19 @@ def output(*args):
     return subprocess.check_output(args)
 
 
+def production_files(dockerfile):
+    # The default image inherits the first stage. Optional verifier files are in a sibling stage.
+    lines = dockerfile.splitlines()
+    stages = [i for i, line in enumerate(lines) if line.startswith('FROM ')]
+    first = lines[stages[0]:stages[1]] if len(stages) > 1 else lines
+    return [name for line in first if line.startswith('COPY ') and line.endswith(' /app/')
+            for name in line.split()[1:-1] if name.endswith(('.py', '.gz'))]
+
+
 def main(commit, image, patches):
     sha = output('git', 'rev-parse', commit).decode().strip()
     dockerfile = output('git', 'cat-file', 'blob', f'{sha}:Dockerfile').decode()
-    files = [name for line in dockerfile.splitlines() if line.startswith('COPY ') and line.endswith(' /app/')
-             for name in line.split()[1:-1] if name.endswith(('.py', '.gz'))]
+    files = production_files(dockerfile)
     if not files:
         raise SystemExit('no production files found in Dockerfile')
     image_id = output('docker', 'image', 'inspect', image, '--format', '{{.Id}}').decode().strip()

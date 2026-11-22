@@ -67,3 +67,15 @@ class VerifierTests(unittest.TestCase):
                                  {'toy.py': 'a = 1\nb = 2\n'})
             finally:
                 CASES.pop('test_recipe', None)
+
+    def test_import_failure_has_an_explicit_result(self):
+        from probes import import_state
+        self.assertEqual(import_state(['nonexistent_phase14_module']),
+                         {'import_error': 'ModuleNotFoundError'})
+
+    def test_production_provenance_excludes_experimental_stage(self):
+        from tools.provenance import production_files
+        text = ('FROM python AS selector\nCOPY selector.py evidence.gz /app/\n'
+                'FROM selector AS verifier\nCOPY verifier.py /app/\n'
+                'FROM selector AS production\n')
+        self.assertEqual(production_files(text), ['selector.py', 'evidence.gz'])

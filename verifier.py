@@ -158,12 +158,19 @@ class Experiment:
         current = self.run(view, action, payload, timeout)
         if not initial or not current:
             return 'inconclusive'
+        if action == 'import':
+            if 'import_error' in initial:
+                return 'inconclusive'
+            if 'import_error' in current:
+                return 'import_error'
+            if initial['opaque'] or current['opaque']:
+                return 'partial_change' if initial != current else 'partial_equal'
         if action == 'tpc' and any(row['graph'] is None for rows in (initial, current) for row in rows.values()):
             return 'inconclusive'
         return 'equal_projection' if initial == current else 'changed_projection'
 
     def __call__(self, diff, ids, tests, evidence, reason):
-        if not ids or not self.jobs_left or not self.enabled & {'cheap', 'tpc'}:
+        if not ids or not self.jobs_left or not self.enabled & {'cheap', 'import', 'tpc'}:
             return ids
         protected = set(evidence['hits'].get('!untraced', ())) | set(evidence.get('line_evidence', {}).get('extra', ()))
         retained = {evidence['ids'][i] for i in protected if i >= 0}
@@ -171,18 +178,25 @@ class Experiment:
         proposed = plan(candidates, retained, 'calibrate' in self.enabled) if 'cheap' in self.enabled else []
         tpc = [name for name, method in (('tpc-h', 'test_execute_tpch'), ('tpc-ds', 'test_execute_tpcds'))
                if any(test.endswith('::TestExecutor::' + method) for test in ids)]
-        if not proposed and not ('tpc' in self.enabled and tpc and self.tpc_left):
+        if not proposed and 'import' not in self.enabled and not ('tpc' in self.enabled and tpc and self.tpc_left):
             return ids
         try:
             updates = read_updates(diff, BASE)
             code = all(path.startswith('sqlglot/') and path.endswith('.py') for path in updates)
             structural = code and any(classify_change((BASE/path).read_text(encoding='utf-8'), content)['structural']
                                       for path, content in updates.items())
+            check_import = structural and 'import' in self.enabled
             check_tpc = 'tpc' in self.enabled and bool(tpc) and self.tpc_left and code and not structural
-            if not proposed and not check_tpc:
+            if not proposed and not check_import and not check_tpc:
                 return ids
             self.jobs_left -= 1
             with overlay(BASE, updates) as view:
+                if check_import:
+                    modules = [k.removesuffix('.py').removesuffix('/__init__').replace('/', '.') for k in updates]
+                    observed = self.compare(view, 'import', modules, 4)
+                    print('verification import', observed, file=sys.stderr)
+                    # Projected equality cannot establish absence of import-time effects.
+                    return None if observed == 'import_error' else ids
                 report = self.run(view, 'pytest', proposed, 5) if proposed else {}
                 passed = passed_tests(report, proposed) if report else set()
                 remaining = ids - passed
@@ -210,6 +224,9 @@ def main():
         result, action, payload = Path(sys.argv[2]), sys.argv[3], json.loads(sys.argv[4])
         if action == 'pytest':
             report = pytest_report(payload, result.parent/'pytest-tmp')
+        elif action == 'import':
+            from probes import import_state
+            report = import_state(payload)
         elif action == 'tpc':
             from probes import tpc_handoff
             report = tpc_handoff(*payload)

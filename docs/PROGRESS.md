@@ -866,3 +866,69 @@ comparison, then integrated ablation and review. Ruling: keep experimental
 execution out of the default image until passing results justify exclusion.
 The shared interface is validated same-path edits and the original
 candidate set, with incomplete evidence always retaining candidates.
+
+### Phase 14 evidence and release decision
+
+P14-A is e0a9c49297c02aded7d0d9b9482faba5ee4fb560. P14-B is
+48156edab058e19a74a4de55ce9b52268f9c68ce. P14-C and the integrated
+experimental pipeline are the commit containing this report.
+
+**Candidate execution.** The locked image collected all 1621 organizer IDs
+including the skipped test. Its 363 source archive files matched the exact
+pinned Git archive byte for byte. One ordinary pytest test took 0.46?0.63
+CPU seconds and correctly reported a clean pass, an assertion failure and a
+teardown failure on their respective inputs. The economic gate admitted no
+jobs on the dev, validation or frozen holdout batch. Forcing verification on
+the six validation patches took 7.298 median CPU seconds at unchanged
+98.559 CI seconds. On the holdout the first run took 23.782 CPU seconds and
+saved 0.477 CI seconds. The next run produced a different schedule. The
+forced mode cannot meet the release performance or determinism gates.
+
+The fresh order-dependent mutation also demonstrated a concrete fidelity
+gap. The full suite failed subsecond_precision after format_time changed
+class state. A fresh isolated invocation of subsecond_precision passed.
+The static analyzer protected this patch with full-suite selection. The
+three new complete mutations retained all 323 failing parent IDs, including
+all four affected by the teardown mutation.
+
+**TPC projections.** The probe recorded 22 TPC-H parent parse cases and 99
+TPC-DS cases, with 57 TPC-DS cases executing. Traced collection recorded
+26476 and 325856 per-query line observations, at 0.585 and 18.396 CPU
+seconds. The untraced TPC-DS handoff took about 5.6?7.2 CPU seconds per
+child. A source-comment control preserved all projections. An
+eliminate-joins mutation changed 55 TPC-DS projections. A holdout pair
+gave equal TPC-H projections and changed TPC-DS projections. The probe
+does not prove worker initialization, data and cache equivalence, so it
+never removes the parent tests.
+
+**Import state.** Separate children observed the serde INDEX replacement
+in the projected module cells, with opaque roots still present. The
+fingerprint handles nested ordered container values and aliasing, and
+reports partial coverage rather than equating opaque states. It does not
+model all reflected references, closures across modules, registries after
+later lazy imports or arbitrary descriptors. The stage keeps all static
+readers unless it observes a failed import, in which case it widens.
+
+| Native Docker configuration | Public CI | Public CPU | Holdout CI | Holdout CPU | Holdout total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Phase 13 baseline | 129.530 | 1.198 | 370.546 | 1.188 | 371.734 |
+| Phase 14 default | 129.530 | 1.196 | 370.546 | 1.044 | 371.590 |
+| Import probe | n/a | n/a | 370.546 | 4.801 | 375.347 |
+| TPC probe | n/a | n/a | 370.546 | 13.476 | 384.022 |
+| All experimental stages | 129.530 | 16.073 | 370.546 | 17.387 | 387.933 |
+
+The three default runs per split were deterministic and had zero public,
+holdout and fresh mutation misses. Peak default RSS was 123392 KiB.
+The integrated experimental holdout also had zero misses and identical
+schedules, but a higher total. No official run was made.
+
+Ruling: preserve Phase 13 scheduling in the default image. Isolation
+passing results are insufficient because of the reproduced order failure,
+and the stage and import projections did not earn their measured CPU.
+Promoting them could increase cost or omit a state-dependent failure.
+
+Final whole-branch review confirmed the conservative default. The
+import-error classification is covered by a regression test. The order
+counterexample is exercised directly in the isolated runner as well as
+the full suite. The existing artifact audit was updated for the first
+production stage and tested against the experimental sibling.

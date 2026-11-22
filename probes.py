@@ -1,10 +1,37 @@
 """Development probes for import state and the SQLGlot executor handoff."""
 from collections import defaultdict
 from hashlib import sha256
+import importlib
 from pathlib import Path
 import sys
 
 from fingerprints import fingerprint
+
+
+def import_state(modules):
+    state = {}
+    for name in sorted(modules):
+        try:
+            module = importlib.import_module(name)
+        except Exception as error:
+            return {'import_error': type(error).__name__}
+        for key, value in vars(module).items():
+            if not key.startswith('__'):
+                state[name + '.' + key] = value
+                if isinstance(value, type) and value.__module__ == name:
+                    state[name + '.' + key + ' attributes'] = dict(vars(value))
+                    state[name + '.' + key + ' bases'] = value.__bases__
+    from sqlglot import exp, Dialect
+    from sqlglot.generator import _DISPATCH_CACHE
+
+    state.update(expressions=exp.EXPR_CLASSES, dialects=Dialect.classes, generator_dispatch=_DISPATCH_CACHE)
+    cells, unknown = {}, []
+    for name, value in sorted(state.items()):
+        try:
+            cells[name] = fingerprint(value)
+        except (TypeError, ValueError, RecursionError):
+            unknown.append(name)
+    return dict(cells=cells, opaque=unknown, imports=sorted(n for n in sys.modules if n.startswith('sqlglot')))
 
 
 def tpc_handoff(dataset, trace=False):
