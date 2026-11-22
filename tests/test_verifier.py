@@ -31,6 +31,21 @@ class VerifierTests(unittest.TestCase):
         self.assertEqual(passed_tests(report | {'collection_error': True}, report['collected']), set())
         self.assertEqual(passed_tests(report, ['different']), set())
 
+    def test_ordered_verification_requires_all_predecessors(self):
+        from verifier import ordered_prefix, ordered_passes
+        full = ['writer', 'reader', 'other']
+        self.assertEqual(ordered_prefix(full, ['reader'], full, 2), ['writer', 'reader'])
+        self.assertIsNone(ordered_prefix(full, ['reader'], full, 1))
+        self.assertIsNone(ordered_prefix(full[1:], ['reader'], full, 2))
+        report = dict(exit=1, collection_error=False, prefix=['writer', 'reader'],
+                      collected=['writer', 'reader'], finished=['writer', 'reader'], passing=['reader'],
+                      failed=['reader'], skipped=[])
+        self.assertEqual(ordered_passes(report, ['reader']), set())
+        report['failed'] = []
+        self.assertEqual(ordered_passes(report, ['reader']), {'reader'})
+        report['finished'] = ['reader']
+        self.assertEqual(ordered_passes(report, ['reader']), set())
+
     def test_state_fingerprint_detects_nested_replacement_and_aliases(self):
         from fingerprints import fingerprint
         child = ['before']

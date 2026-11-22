@@ -14,7 +14,7 @@ from pathlib import Path
 from impact import changed_files, git_diff_text
 from semantic import without_docstrings, classify_change, literal_generator_override, statement_spans
 from predicate import comparison_swap
-from structural import literal_binding, terminal_assertion, passive_generator_class
+from structural import literal_binding, terminal_assertion, passive_generator_class, precision_readers
 from numeric import (ATTRIBUTE, DECODER, WEEK_OFFSET, decoder_sites, numeric_radix_edit,
                      week_offset_edit, week_offset_sites)
 
@@ -756,11 +756,19 @@ def load(tests):
         if data['schema'] == 1 and data['pin'] == PIN and sorted(t['id'] for t in tests) == data['ids']:
             digest = hashlib.sha256(base).hexdigest()
             for filename, key in (('lines.gz', 'line_evidence'), ('predicates.gz', 'predicate_evidence'),
-                                  ('structural.gz', 'structural_evidence'), ('tests.gz', 'test_evidence')):
+                                  ('structural.gz', 'structural_evidence'), ('tests.gz', 'test_evidence'),
+                                  ('precision.gz', 'precision_evidence')):
                 try:
                     auxiliary = json.loads(gzip.decompress(Path(__file__).with_name(filename).read_bytes()))
                     if (auxiliary['version'] == 1 and auxiliary['pin'] == PIN and auxiliary['ids'] == data['ids']
                             and auxiliary['base_digest'] == digest):
+                        if key == 'precision_evidence' and (
+                            auxiliary.get('collector') != 'typed-read-sites-v1'
+                            or not isinstance(auxiliary.get('bindings'), dict)
+                            or not isinstance(auxiliary.get('extra'), list)
+                            or any(type(i) is not int or not 0 <= i < len(tests) for i in auxiliary['extra'])
+                        ):
+                            continue
                         data[key] = auxiliary
                 except (OSError, EOFError, ValueError, KeyError, TypeError, zlib.error):
                     pass
@@ -970,6 +978,16 @@ def decide(diff, data, mode='scope'):
             code_changed = True
             skipped = set()
             if change['structural']:
+                if mode == 'scope' and len(updates) == 1:
+                    precision = data.get('precision_evidence', {})
+                    bindings = precision.get('bindings', {}).get(path)
+                    observed = precision_readers(original, new, bindings, len(data['ids'])) if isinstance(bindings, dict) else None
+                    if observed is not None:
+                        required, configuration_reason = observed
+                        chosen.update(required)
+                        chosen.update(data.get('line_evidence', {}).get('extra', ()))
+                        chosen.update(precision['extra'])
+                        continue
                 if mode == 'scope' and len(updates) == 1 and not is_core(path):
                     bindings = data.get('structural_evidence', {}).get('globals', {}).get(path, {})
                     readers = bindings.get(literal_binding(original, new)) if bindings else None

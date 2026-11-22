@@ -23,6 +23,85 @@ def literal_binding(old, new):
     return a.targets[0].id if ast.dump(a) == ast.dump(b) else None
 
 
+def literal_mapping(node):
+    """Plain, ordered string-key dictionary of immutable literal values."""
+    if not isinstance(node, ast.Dict):
+        return None
+    def safe(value):
+        return type(value) in (*SCALARS, type(None)) or type(value) is tuple and all(map(safe, value))
+    result = {}
+    for key, value in zip(node.keys, node.values):
+        if not isinstance(key, ast.Constant) or type(key.value) is not str or key.value in result:
+            return None
+        try:
+            parsed = ast.literal_eval(value)
+        except (ValueError, TypeError):
+            return None
+        if not safe(parsed):
+            return None
+        result[key.value] = parsed
+    return result or None
+
+
+def named_literal(statement):
+    if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+        target = statement.targets[0]
+    elif isinstance(statement, ast.AnnAssign):
+        target = statement.target
+    else:
+        return None
+    if isinstance(target, ast.Name):
+        return target, statement.value
+    return None
+
+
+def binding_delta(old, new):
+    """Return the one edited literal binding and optional dictionary value keys."""
+    scalar = literal_binding(old, new)
+    if scalar:
+        return scalar, None
+    before, after = ast.parse(old), ast.parse(new)
+    if len(before.body) != len(after.body):
+        return None
+    changes = [(a, b) for a, b in zip(before.body, after.body) if ast.dump(a) != ast.dump(b)]
+    if len(changes) != 1:
+        return None
+    a, b = changes[0]
+    lhs, rhs = named_literal(a), named_literal(b)
+    if not lhs or not rhs:
+        return None
+    old_map, new_map = literal_mapping(lhs[1]), literal_mapping(rhs[1])
+    if not old_map or not new_map or list(old_map) != list(new_map):
+        return None
+    if any(type(old_map[k]) is not type(new_map[k]) for k in old_map):
+        return None
+    # Compare AST literals as well, so True, 1 and signed spellings remain distinct.
+    keys = tuple(k for k, x, y in zip(old_map, lhs[1].values, rhs[1].values) if ast.dump(x) != ast.dump(y))
+    b.value = a.value
+    if keys and ast.dump(a) == ast.dump(b):
+        return lhs[0].id, keys
+
+
+def precision_readers(old, new, bindings, size):
+    delta = binding_delta(old, new)
+    if delta is None:
+        return None
+    name, keys = delta
+    entry = bindings.get(name)
+    kind = 'attribute' if keys is None else 'key'
+    if not isinstance(entry, dict) or entry.get('kind') != kind:
+        return None
+    recorded = entry.get('keys')
+    keys = ('',) if keys is None else keys
+    if not isinstance(recorded, dict) or any(not recorded.get(key) for key in keys):
+        return None
+    groups = [entry.get('unknown'), *(recorded[key] for key in keys)]
+    if any(not isinstance(group, list) or any(type(i) is not int or not 0 <= i < size for i in group)
+           for group in groups):
+        return None
+    return {i for group in groups for i in group}, 'module_attribute' if kind == 'attribute' else 'mapping_key'
+
+
 def global_readers(source, name):
     """Only direct runtime loads of a unique module scalar binding are bounded."""
     tree = ast.parse(source)

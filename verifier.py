@@ -62,7 +62,24 @@ def plan(tests, retained, calibrate=False):
     return sorted(affordable)
 
 
-def pytest_report(ids, temporary):
+def ordered_prefix(collected, ids, expected, limit, skipped=()):
+    if ([name for name in collected if name not in skipped] != expected
+            or set(collected) != set(expected) | set(skipped) or not ids or not set(ids) <= set(expected)):
+        return None
+    count = max(collected.index(name) for name in ids) + 1
+    return collected[:count] if count <= limit else None
+
+
+def ordered_passes(report, ids):
+    prefix = report.get('prefix')
+    if (not prefix or report.get('collected') != prefix or not set(ids) <= set(prefix)
+            or set(report.get('finished', ())) != set(prefix)
+            or report.get('exit') not in (0, 1) or report.get('collection_error', True)):
+        return set()
+    return (set(report['passing']) & set(ids)) - set(report['failed']) - set(report['skipped'])
+
+
+def pytest_report(ids, temporary, expected=None, skipped=(), limit=64):
     import pytest
 
     class Reports:
@@ -70,9 +87,20 @@ def pytest_report(ids, temporary):
             self.collected = []
             self.calls = set()
             self.finished = set()
+            self.completed = set()
             self.failed = set()
             self.skipped = set()
             self.collection_error = False
+            self.prefix = None
+
+        @pytest.hookimpl(trylast=True)
+        def pytest_collection_modifyitems(self, items):
+            if expected is None:
+                return
+            self.prefix = ordered_prefix([item.nodeid for item in items], ids, expected, limit, skipped)
+            wanted = len(self.prefix or ())
+            if wanted < len(items):
+                items[:] = items[:wanted]
 
         def pytest_collection_finish(self, session):
             self.collected = [item.nodeid for item in session.items]
@@ -89,13 +117,15 @@ def pytest_report(ids, temporary):
                 self.calls.add(report.nodeid)
             if report.passed and report.when == 'teardown':
                 self.finished.add(report.nodeid)
+            if report.when == 'teardown':
+                self.completed.add(report.nodeid)
 
     reports = Reports()
     status = pytest.main(['-q', '--tb=no', '-p', 'no:cacheprovider',
-                          '--basetemp', str(temporary), *ids], plugins=[reports])
+                          '--basetemp', str(temporary), *(ids if expected is None else ['tests'])], plugins=[reports])
     return dict(exit=int(status), collected=reports.collected, passing=sorted(reports.calls & reports.finished),
                 failed=sorted(reports.failed), skipped=sorted(reports.skipped),
-                collection_error=reports.collection_error)
+                collection_error=reports.collection_error, prefix=reports.prefix, finished=sorted(reports.completed))
 
 
 def passed_tests(report, ids):
@@ -170,12 +200,23 @@ class Experiment:
         return 'equal_projection' if initial == current else 'changed_projection'
 
     def __call__(self, diff, ids, tests, evidence, reason):
-        if not ids or not self.jobs_left or not self.enabled & {'cheap', 'import', 'tpc'}:
+        if not ids or not self.jobs_left or not self.enabled & {'cheap', 'ordered', 'import', 'tpc'}:
             return ids
         protected = set(evidence['hits'].get('!untraced', ())) | set(evidence.get('line_evidence', {}).get('extra', ()))
         retained = {evidence['ids'][i] for i in protected if i >= 0}
         candidates = [test for test in tests if test['id'] in ids]
-        proposed = plan(candidates, retained, 'calibrate' in self.enabled) if 'cheap' in self.enabled else []
+        ordered = 'ordered' in self.enabled
+        calibrate = 'calibrate' in self.enabled
+        if ordered:
+            retained.update(test['id'] for test in tests[64:])
+        proposed = plan(candidates, retained, calibrate) if self.enabled & {'cheap', 'ordered'} else []
+        manifest = None
+        if ordered and proposed:
+            proposed_set = set(proposed)
+            prefix_end = max(i for i, test in enumerate(tests) if test['id'] in proposed_set)
+            savings = simulated(candidates) - simulated([t for t in candidates if t['id'] not in proposed_set])
+            if not calibrate and savings <= 1.0 + 1.5 * sum(t['seconds'] for t in tests[:prefix_end + 1]):
+                proposed = []
         tpc = [name for name, method in (('tpc-h', 'test_execute_tpch'), ('tpc-ds', 'test_execute_tpcds'))
                if any(test.endswith('::TestExecutor::' + method) for test in ids)]
         if not proposed and 'import' not in self.enabled and not ('tpc' in self.enabled and tpc and self.tpc_left):
@@ -197,12 +238,19 @@ class Experiment:
                     print('verification import', observed, file=sys.stderr)
                     # Projected equality cannot establish absence of import-time effects.
                     return None if observed == 'import_error' else ids
-                report = self.run(view, 'pytest', proposed, 5) if proposed else {}
-                passed = passed_tests(report, proposed) if report else set()
+                action = 'ordered' if ordered else 'pytest'
+                if ordered and proposed:
+                    manifest = json.loads(Path('/data/tests.json').read_bytes())
+                payload = [proposed, [test['id'] for test in tests], manifest.get('skipped', [])] if manifest else proposed
+                report = self.run(view, action, payload, 5) if proposed else {}
+                passed = (ordered_passes if ordered else passed_tests)(report, proposed) if report else set()
                 remaining = ids - passed
                 if proposed:
                     status = 'reported' if report else 'inconclusive'
-                    print('verification pytest', status, len(proposed), len(passed), file=sys.stderr)
+                    print('verification', action, status, len(proposed), len(passed), file=sys.stderr)
+                if ordered:
+                    # Calibration only. A prefix pass needs independent seed and suite-state validation.
+                    remaining = ids
                 if check_tpc:
                     self.tpc_left -= 1
                     for name in tpc:
@@ -216,7 +264,7 @@ def main():
     if len(sys.argv) == 5 and sys.argv[1] == 'child':
         import resource
 
-        cpu = 5 if sys.argv[3] == 'pytest' else 35
+        cpu = 5 if sys.argv[3] in ('pytest', 'ordered') else 35
         resource.setrlimit(resource.RLIMIT_CPU, (cpu - 1, cpu))
         resource.setrlimit(resource.RLIMIT_FSIZE, (8_000_000, 8_000_000))
         resource.setrlimit(resource.RLIMIT_AS, (3_000_000_000, 3_000_000_000))
@@ -224,6 +272,9 @@ def main():
         result, action, payload = Path(sys.argv[2]), sys.argv[3], json.loads(sys.argv[4])
         if action == 'pytest':
             report = pytest_report(payload, result.parent/'pytest-tmp')
+        elif action == 'ordered':
+            ids, expected, skipped = payload
+            report = pytest_report(ids, result.parent/'pytest-tmp', expected, skipped)
         elif action == 'import':
             from probes import import_state
             report = import_state(payload)

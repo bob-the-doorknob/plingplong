@@ -14,6 +14,7 @@
 !structural.py
 !structural.gz
 !tests.gz
+!precision.gz
 
 !verifier.py
 !blast-radius-sample/

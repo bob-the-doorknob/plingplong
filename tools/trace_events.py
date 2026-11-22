@@ -260,7 +260,7 @@ def snapshot():
 def boundary(nodeid):
     """Compare sqlglot globals and class containers with the previous test boundary."""
     global last_snapshot, last_test
-    if LINE_ONLY:
+    if LINE_ONLY or log is None:
         return
     busy[0] = True
     try:

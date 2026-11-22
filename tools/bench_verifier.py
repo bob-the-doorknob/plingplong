@@ -17,7 +17,7 @@ from score import evaluate_run
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('image')
-    parser.add_argument('split', choices=('public', 'holdout', 'dev', 'validation', 'p13', 'p14', 'p15'))
+    parser.add_argument('split', choices=('public', *sorted({split for _, split, _ in CASES.values()})))
     parser.add_argument('--case', action='append', choices=CASES, help='explicit mutation subset')
     parser.add_argument('--mode', default='')
     parser.add_argument('--runs', type=int, default=3)

@@ -17,3 +17,7 @@ if os.environ.get("BR_LABELED_POOL") == "1":
 if os.environ.get("BR_DIRECT_TRACE") == "1":
     import trace_direct_children
     trace_direct_children.start()
+
+if os.environ.get("BR_PRECISION") == "1":
+    import trace_precision
+    trace_precision.start()

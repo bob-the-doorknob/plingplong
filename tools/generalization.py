@@ -144,6 +144,22 @@ PHASE15 = {
 }
 CASES.update(PHASE15)
 
+PHASE16 = {
+    'p16_postgres_factor': ('mapping_value', 'p16dev', [('sqlglot/generators/postgres.py',
+        '"DAY": " / 86400",', '"DAY": " / 86000",')]),
+    'p16_trunc_format': ('mapping_value', 'p16dev', [('sqlglot/dialects/dialect.py',
+        '"MI": "MINUTE",', '"MI": "SECOND",')]),
+    'p16_hive_factor': ('mapping_value', 'p16', [('sqlglot/generators/hive.py',
+        '"HOUR": " / 3600",', '"HOUR": " / 3610",')]),
+    'p16_tsql_format': ('mapping_value', 'p16', [('sqlglot/generators/tsql.py',
+        '"WEEKISO": "ISO_WEEK",', '"WEEKISO": "WEEK",')]),
+    'p16_root_parse_format': ('mapping_value', 'p16', [('sqlglot/dialects/dialect.py',
+        '"YYYY": "YEAR",\n    "YEAR": "YEAR",', '"YYYY": "MONTH",\n    "YEAR": "YEAR",')]),
+    'p16_root_generate_format': ('mapping_value', 'p16', [('sqlglot/dialects/dialect.py',
+        '"HOUR": "HH",\n    "MINUTE": "MI",', '"HOUR": "HH",\n    "MINUTE": "HH",')]),
+}
+CASES.update(PHASE16)
+
 
 def digest(payload):
     return hashlib.sha256(payload).hexdigest()
@@ -386,7 +402,7 @@ def main():
     parser.add_argument('action', choices=['list', 'generate', 'label', 'score'])
     parser.add_argument('case', nargs='?', choices=['baseline', *CASES])
     parser.add_argument('--checkout', type=Path, default=ROOT)
-    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'p13', 'p14', 'p15', 'all'], default='all')
+    parser.add_argument('--split', choices=['all', *sorted({split for _, split, _ in CASES.values()})], default='all')
     parser.add_argument('--attribution', action='store_true')
     args = parser.parse_args()
     if args.action == 'list':
