@@ -232,9 +232,30 @@ class MutatingCalls(unittest.TestCase):
                 self.assertIsNone(classify_change(old, new).get('class_attributes'))
 
     def test_new_names_in_class_values_fall_back(self):
-        old = 'import exp\n\nclass Widget(Base):\n    TABLE = {"a": exp.First}\n\ndef f():\n    return exp.Second\n'
+        old = 'import exp\n\nSECOND = exp.Second\n\nclass Widget(Base):\n    TABLE = {"a": exp.First}\n'
         self.assertEqual(classify_change(old, old.replace('exp.First}', 'exp.Second}'))['class_attributes'],
                          [dict(cls='Widget', attr='TABLE', body_read=False)])
         self.assertIsNone(classify_change(old, old.replace('exp.First}', 'exp.Missing}')).get('class_attributes'))
         removed = 'class Widget(Base):\n    def run(self):\n        return 1\n    ALIAS = run\n'
         self.assertIsNone(classify_change(removed, removed.replace('def run(self)', 'def other(self)')).get('members'))
+
+
+class ImportSafetyReview(unittest.TestCase):
+    def test_added_method_shadowing_a_class_body_name_falls_back(self):
+        old = 'def run():\n    return 0\n\n\nclass Widget(Base):\n    ALIAS = run\n'
+        new = old.replace('class Widget(Base):\n', 'class Widget(Base):\n    def run(self):\n        return 1\n\n')
+        self.assertIsNone(classify_change(old, new).get('members'))
+
+    def test_names_only_used_in_function_bodies_are_not_known(self):
+        old = 'import exp\n\nclass Widget(Base):\n    TABLE = {"a": exp.First}\n\ndef f():\n    return later.Second\n'
+        self.assertIsNone(classify_change(old, old.replace('exp.First}', 'later.Second}')).get('class_attributes'))
+
+    def test_mutators_must_match_the_literal_container(self):
+        for value, old, new, ok in [('[1]', 'T.append(1)', 'T.append(2)', True), ('{1}', 'T.append(1)', 'T.append(2)', False),
+                                    ('{"a": 1}', 'T.update(a=1)', 'T.update(a=2)', True),
+                                    ('{"a": 1}', 'T.update({"a": X})', 'T.update({"b": X})', False),
+                                    ('base.copy()', 'T.update(a=1)', 'T.update(a=2)', False)]:
+            source = f'class Widget(Base):\n    T = {value}\n    {old}\n'
+            with self.subTest(value=value, new=new):
+                result = classify_change(source, source.replace(old, new)).get('class_attributes')
+                self.assertEqual(bool(result), ok)

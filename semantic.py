@@ -123,9 +123,6 @@ def _boolean_schema_edit(before, after):
     return [key.value for key in first.value.keys] == [key.value for key in second.value.keys]
 
 
-SAFE_MUTATORS = frozenset({'discard', 'setdefault', 'update', 'add', 'append', 'extend'})
-
-
 def _dotted(node):
     """Dotted names (and their prefixes) loaded anywhere in node."""
     names = set()
@@ -148,12 +145,19 @@ def _blank_constants(node):
     return ast.dump(copy)
 
 
-def _non_raising_call(a, b):
-    """Both calls use a mutator that cannot raise for new literal arguments."""
+MUTATORS_BY_TYPE = {ast.Dict: {'setdefault', 'update'}, ast.Set: {'add', 'discard', 'update'},
+                    ast.List: {'append', 'extend'}}
+
+
+def _non_raising_call(a, b, container):
+    """Both calls use a mutator of the bound literal container type with literal arguments."""
     call = b.value
     method = call.func.attr
-    safe = method in SAFE_MUTATORS or (method == 'pop' and len(call.args) == 2 and not call.keywords)
-    return safe and _blank_constants(a) == _blank_constants(b)
+    allowed = MUTATORS_BY_TYPE.get(type(container), set())
+    safe = method in allowed or (isinstance(container, ast.Dict) and method == 'pop'
+                                 and len(call.args) == 2 and not call.keywords)
+    literal = all(_literal(arg) for arg in call.args) and all(_literal(k.value) for k in call.keywords)
+    return safe and literal and _blank_constants(a) == _blank_constants(b)
 
 
 def _mutating_call(node):
@@ -197,7 +201,8 @@ def _class_attribute_changes(old_body, new_body, prefix='', in_class=False, know
         mutated = _mutating_call(a) if in_class else None
         if mutated and mutated == _mutating_call(b) and _bindings(old_body, mutated[0]) == 1 \
                 and _bindings(new_body, mutated[0]) == 1 and any(
-                    _assigned_name(st) == mutated[0] for st in old_body) and _non_raising_call(a, b):
+                    _assigned_name(st) == mutated[0] for st in old_body) and _non_raising_call(
+                    a, b, next(st.value for st in old_body if _assigned_name(st) == mutated[0])):
             # A class-body call such as KEYWORDS.pop("X") changes the value of that attribute.
             changes.append(dict(cls=prefix[:-1], attr=mutated[0], body_read=True))
             continue
@@ -304,7 +309,7 @@ def _member_changes(old_body, new_body, postponed, prefix='', in_class=False):
                     return None
             elif in_class and (decorators := _new_member(x or y, postponed)) is not False:
                 # A removed method still named by the class body would raise at import.
-                if x is not None and (_body_reads(new_body, name) or _body_reads(old_body, name)):
+                if _body_reads(new_body, name) or _body_reads(old_body, name):
                     return None
                 changes.append(('member', prefix[:-1], name, decorators))
             else:
@@ -338,8 +343,10 @@ def classify_change(old: str, new: str) -> dict:
         return result
     result['ast_equal'] = ast.dump(before) == ast.dump(after)
 
-    known = _dotted(before)
     previous, old_structure, old_duplicate, old_parents = _split(before)
+    # Names the pinned module evaluated at import: module and class scope only, since
+    # _split replaced every function and lambda body with a placeholder.
+    known = _dotted(before)
     current, new_structure, new_duplicate, new_parents = _split(after)
     changed = {name for name in previous.keys() | current.keys()
                if previous.get(name) != current.get(name)}
