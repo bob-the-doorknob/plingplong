@@ -932,3 +932,32 @@ import-error classification is covered by a regression test. The order
 counterexample is exercised directly in the isolated runner as well as
 the full suite. The existing artifact audit was updated for the first
 production stage and tested against the experimental sibling.
+
+## Phase 15 ranked structural fallbacks
+
+Started from 2c3f08541e1162a1d07c18eac358e0ffa823adab. Native restricted
+Docker reproduced 129.530 public and 370.546 holdout CI seconds, zero
+misses, and five holdout full-suite fallbacks. Median CPU was 1.255 and
+1.133 seconds respectively. The dated official track cutoff is
+November 23 at 00:00 Singapore time. The SHA behind the reported
+272-second official result was unavailable.
+
+Run tools/generalization.py score --split HOLDOUT_OR_DEV_OR_VALIDATION
+--attribution to rank complete cases by the CI gap to scheduling only
+the failing IDs with the same LPT scheduler. The report includes all
+failing parent IDs, leave-one-out marginal CI savings and inconclusive
+case status. Development reports are kept outside the image.
+
+The three largest holdout gaps were CLI deletion, CLI rename, and a
+private generator subclass addition. Each cost 36.817 seconds and
+had zero failures in full-suite labels. The CLI-only checkpoint accepts
+validated changes to the pinned package entrypoint, including complete
+deletion and a fresh private root-module rename with unchanged bytes.
+All raw readers and uncertain tests are retained. The numbered pinned
+suite does not execute the CLI or enumerate root package files.
+The doctest-only package walk is outside the numbered catalog.
+
+CLI-only restricted Docker reduced holdout CI to 301.708 seconds in
+three identical runs at 1.359 seconds median CPU, with zero misses.
+The four fresh Phase 15 mutations scored 78.430 seconds at 0.338 seconds
+median CPU before the private subclass rule. No evidence files changed.

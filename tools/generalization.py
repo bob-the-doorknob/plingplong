@@ -133,6 +133,18 @@ PHASE14 = {
 CASES.update(PHASE14)
 
 
+PHASE15 = {
+    'p15_cli_usage': ('entrypoint_edit', 'p15', [('sqlglot/__main__.py',
+        'description="Transpile SQL"', 'description="Translate SQL"')]),
+    'p15_cli_rename': ('file_renamed', 'p15', [('sqlglot/__main__.py', None, 'sqlglot/_sql_command.py')]),
+    'p15_private_dremio': ('class_added', 'p15', [('sqlglot/generators/dremio.py', '',
+        '\n\nclass _CompatibilityGenerator(DremioGenerator):\n    TRY_SUPPORTED = True\n')]),
+    'p15_rebound_dremio': ('class_rebound', 'p15', [('sqlglot/generators/dremio.py', '',
+        '\n\nclass DremioGenerator(DremioGenerator):\n    def select_sql(self, expression):\n        return "SELECT 0"\n')]),
+}
+CASES.update(PHASE15)
+
+
 def digest(payload):
     return hashlib.sha256(payload).hexdigest()
 
@@ -271,7 +283,24 @@ def complete_label(label, patch, catalog, catalog_digest):
     )
 
 
-def summarize(checkout, split):
+def cost_attribution(selected, failures, lookup, durations, cost, schedule):
+    def packed_cost(ids):
+        workers = schedule([lookup[name] for name in ids])
+        return max((sum(durations[n] for n in worker) for worker in workers), default=0) + 2000*len(workers)
+
+    oracle = packed_cost(failures)
+    marginal = {}
+    avoidable = sorted(selected - failures)
+    for name in avoidable:
+        duration = durations[lookup[name]['number']]
+        if duration not in marginal:
+            marginal[duration] = cost - packed_cost(selected - {name})
+    top = sorted(((name, marginal[durations[lookup[name]['number']]]) for name in avoidable),
+                 key=lambda pair: (-pair[1], -durations[lookup[pair[0]]['number']], pair[0]))
+    return dict(oracle_ms=oracle, oracle_gap_ms=cost-oracle, avoidable_top=top[:5])
+
+
+def summarize(checkout, split, attribution=False):
     sys.path.insert(0, str(checkout.resolve()))
     from hybrid import decide, load
     from selector import schedule
@@ -310,6 +339,7 @@ def summarize(checkout, split):
     full = Counter()
     expensive_picks = Counter()
     expensive = sorted(names, key=lambda name: (-durations_by_id[name], name))[:5]
+    audit = []
     for case, category, group, patch, selected, reason, packed in decisions:
         label_path = REPORTS / f'{case}.json'
         label = json.loads(label_path.read_text(encoding='utf-8')) if label_path.exists() else None
@@ -321,14 +351,20 @@ def summarize(checkout, split):
         longest = min(selected, key=lambda name: (-durations_by_id[name], name), default=None)
         reduced = schedule([lookup[name] for name in selected if name != longest])
         reduced_cost = max((sum(durations[n] for n in w) for w in reduced), default=0) + 2000*len(reduced)
-        print(json.dumps(dict(case=case, category=category, split=group,
+        row = dict(case=case, category=category, split=group,
                               paths=label['paths'] if label else [r[0] for r in CASES[case][2]],
                               label='complete' if complete else 'inconclusive', reason=reason,
                               errors=label['errors'] if label else [], label_exit=label['exit'] if label else None,
                               selected=len(selected),
                               full=len(selected) == len(names), ci_ms=cost, longest=longest,
                               longest_marginal_ms=cost-reduced_cost, runtime_verification=False,
-                              failing=sorted(failures) if complete else None, missed=misses)))
+                              failing=sorted(failures) if complete else None, missed=misses)
+        if attribution:
+            if complete:
+                row.update(cost_attribution(selected, failures, lookup, durations, cost, schedule))
+            audit.append(row)
+        else:
+            print(json.dumps(row))
         if complete:
             rows.append(json.dumps(payload))
             answers[case] = {'failing': sorted(lookup[name]['number'] for name in failures)}
@@ -336,6 +372,8 @@ def summarize(checkout, split):
             costs[category] += 1
             full[category] += len(selected) == len(names)
             expensive_picks.update(name for name in expensive if name in selected)
+    for row in sorted(audit, key=lambda r: (-r.get('oracle_gap_ms', -1), r['case'])):
+        print(json.dumps(row))
     result = evaluate_run('\n'.join(rows).encode(), catalog['tests'], answers)
     print(json.dumps(dict(result=result, completed=len(rows), scored=len(decisions), missing=missing, cpu_s=cpu,
                           category_ci_ms=dict(sorted(totals.items())), category_counts=dict(costs),
@@ -348,7 +386,8 @@ def main():
     parser.add_argument('action', choices=['list', 'generate', 'label', 'score'])
     parser.add_argument('case', nargs='?', choices=['baseline', *CASES])
     parser.add_argument('--checkout', type=Path, default=ROOT)
-    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'p13', 'p14', 'all'], default='all')
+    parser.add_argument('--split', choices=['dev', 'holdout', 'validation', 'p13', 'p14', 'p15', 'all'], default='all')
+    parser.add_argument('--attribution', action='store_true')
     args = parser.parse_args()
     if args.action == 'list':
         print('\n'.join(['baseline', *CASES]))
@@ -366,7 +405,7 @@ def main():
             parser.error('label requires a case name')
         return label(args.case)
     else:
-        return summarize(args.checkout, args.split)
+        return summarize(args.checkout, args.split, args.attribution)
 
 
 if __name__ == '__main__':
