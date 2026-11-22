@@ -123,6 +123,39 @@ def _boolean_schema_edit(before, after):
     return [key.value for key in first.value.keys] == [key.value for key in second.value.keys]
 
 
+SAFE_MUTATORS = frozenset({'discard', 'setdefault', 'update', 'add', 'append', 'extend'})
+
+
+def _dotted(node):
+    """Dotted names (and their prefixes) loaded anywhere in node."""
+    names = set()
+    for sub in ast.walk(node):
+        parts = []
+        while isinstance(sub, ast.Attribute):
+            parts.append(sub.attr)
+            sub = sub.value
+        if isinstance(sub, ast.Name):
+            chain = [sub.id] + parts[::-1]
+            names.update('.'.join(chain[:i]) for i in range(1, len(chain) + 1))
+    return names
+
+
+def _blank_constants(node):
+    copy = ast.parse(ast.unparse(node))
+    for sub in ast.walk(copy):
+        if isinstance(sub, ast.Constant):
+            sub.value = None
+    return ast.dump(copy)
+
+
+def _non_raising_call(a, b):
+    """Both calls use a mutator that cannot raise for new literal arguments."""
+    call = b.value
+    method = call.func.attr
+    safe = method in SAFE_MUTATORS or (method == 'pop' and len(call.args) == 2 and not call.keywords)
+    return safe and _blank_constants(a) == _blank_constants(b)
+
+
 def _mutating_call(node):
     """(name, method) of a class-body statement NAME.method(...), else None."""
     if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
@@ -143,7 +176,7 @@ def without_docstrings(source):
     return ast.dump(tree)
 
 
-def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
+def _class_attribute_changes(old_body, new_body, prefix='', in_class=False, known=None):
     if len(old_body) != len(new_body):
         return None
     changes = []
@@ -154,7 +187,7 @@ def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
                 ast.dump(ast.Tuple(elts=getattr(a, f, []), ctx=ast.Load()))
                 == ast.dump(ast.Tuple(elts=getattr(b, f, []), ctx=ast.Load()))
                 for f in ('bases', 'keywords', 'decorator_list', 'type_params')):
-            inner = _class_attribute_changes(a.body, b.body, prefix + a.name + '.', True)
+            inner = _class_attribute_changes(a.body, b.body, prefix + a.name + '.', True, known)
             if inner is None:
                 return None
             if len(inner) == 1 and _boolean_schema_edit(a, b):
@@ -164,7 +197,7 @@ def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
         mutated = _mutating_call(a) if in_class else None
         if mutated and mutated == _mutating_call(b) and _bindings(old_body, mutated[0]) == 1 \
                 and _bindings(new_body, mutated[0]) == 1 and any(
-                    _assigned_name(st) == mutated[0] for st in old_body):
+                    _assigned_name(st) == mutated[0] for st in old_body) and _non_raising_call(a, b):
             # A class-body call such as KEYWORDS.pop("X") changes the value of that attribute.
             changes.append(dict(cls=prefix[:-1], attr=mutated[0], body_read=True))
             continue
@@ -176,6 +209,9 @@ def _class_attribute_changes(old_body, new_body, prefix='', in_class=False):
             return None
         kind = _literal_kind(a.value)
         if kind is not None and _literal_kind(b.value) is not kind:
+            return None
+        # A name the pinned file never resolved may raise while the class body runs.
+        if kind is None and known is not None and not _dotted(b.value) - _dotted(a.value) <= known:
             return None
         changes.append(dict(cls=prefix[:-1], attr=name,
                             body_read=_body_reads(old_body, name) or _body_reads(new_body, name)))
@@ -267,6 +303,9 @@ def _member_changes(old_body, new_body, postponed, prefix='', in_class=False):
                 else:
                     return None
             elif in_class and (decorators := _new_member(x or y, postponed)) is not False:
+                # A removed method still named by the class body would raise at import.
+                if x is not None and (_body_reads(new_body, name) or _body_reads(old_body, name)):
+                    return None
                 changes.append(('member', prefix[:-1], name, decorators))
             else:
                 return None
@@ -299,6 +338,7 @@ def classify_change(old: str, new: str) -> dict:
         return result
     result['ast_equal'] = ast.dump(before) == ast.dump(after)
 
+    known = _dotted(before)
     previous, old_structure, old_duplicate, old_parents = _split(before)
     current, new_structure, new_duplicate, new_parents = _split(after)
     changed = {name for name in previous.keys() | current.keys()
@@ -315,7 +355,7 @@ def classify_change(old: str, new: str) -> dict:
     structural = old_structure != new_structure
     # Structural edits explained entirely by class-level assignment values, with
     # unchanged names, bases, keywords, decorators and statements elsewhere.
-    attributes = _class_attribute_changes(before.body, after.body) if structural else None
+    attributes = _class_attribute_changes(before.body, after.body, known=known) if structural else None
     if attributes and any(ambiguous(change['cls']) for change in attributes):
         attributes = None
     members = None

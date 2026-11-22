@@ -216,11 +216,25 @@ class ExpressionRegistry(unittest.TestCase):
 
 
 class MutatingCalls(unittest.TestCase):
-    def test_class_body_pop_changes_the_attribute_value(self):
+    def test_class_body_mutation_changes_the_attribute_value(self):
+        for old, new in [('TABLE.pop("a", None)', 'TABLE.pop("b", None)'), ('TABLE.update({"a": 1})', 'TABLE.update({"a": 2})')]:
+            source = f'class Widget(Base):\n    TABLE = {{"a": 1, "b": 2}}\n    {old}\n'
+            with self.subTest(new=new):
+                result = classify_change(source, source.replace(old, new))
+                self.assertEqual(result['class_attributes'], [dict(cls='Widget', attr='TABLE', body_read=True)])
+
+    def test_mutations_that_may_raise_at_import_fall_back(self):
         old = 'class Widget(Base):\n    TABLE = {"a": 1, "b": 2}\n    TABLE.pop("a")\n'
-        result = classify_change(old, old.replace('pop("a")', 'pop("b")'))
-        self.assertEqual(result['class_attributes'], [dict(cls='Widget', attr='TABLE', body_read=True)])
-        for new in (old.replace('TABLE.pop', 'OTHER.pop'), old.replace('pop("a")', 'clear()'),
+        for new in (old.replace('pop("a")', 'pop("b")'), old.replace('TABLE.pop', 'OTHER.pop'),
+                    old.replace('pop("a")', 'clear()'), old.replace('pop("a")', 'pop("a", None)'),
                     old.replace('    TABLE.pop("a")\n', '    TABLE.pop("a")\n    TABLE.pop("b")\n')):
             with self.subTest(new=new):
                 self.assertIsNone(classify_change(old, new).get('class_attributes'))
+
+    def test_new_names_in_class_values_fall_back(self):
+        old = 'import exp\n\nclass Widget(Base):\n    TABLE = {"a": exp.First}\n\ndef f():\n    return exp.Second\n'
+        self.assertEqual(classify_change(old, old.replace('exp.First}', 'exp.Second}'))['class_attributes'],
+                         [dict(cls='Widget', attr='TABLE', body_read=False)])
+        self.assertIsNone(classify_change(old, old.replace('exp.First}', 'exp.Missing}')).get('class_attributes'))
+        removed = 'class Widget(Base):\n    def run(self):\n        return 1\n    ALIAS = run\n'
+        self.assertIsNone(classify_change(removed, removed.replace('def run(self)', 'def other(self)')).get('members'))

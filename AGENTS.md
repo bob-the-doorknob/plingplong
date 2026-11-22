@@ -24,6 +24,11 @@
   NAME.method(...) call edit is a change of attribute NAME (body read). Any
   arg_types value edit of a non-core Expression class may ignore <module> reads of
   name-derived registry keys only; other module reads fall back.
+- Import-time evaluation must not be able to raise: class-body mutators only in
+  non-raising forms (pop with default, update, setdefault, add, discard, append,
+  extend) with literal-only argument edits; new non-literal class values may not
+  introduce dotted names absent from the pinned file; a removed method may not be
+  named by its class body. An import failure fails whole test files.
 - Class-level assignment values may narrow in a
   non-core file (not parser.py, generator.py, tokens.py, dialects/dialect.py,
   expressions/core.py or any __init__.py), using traced attribute reads. Import
